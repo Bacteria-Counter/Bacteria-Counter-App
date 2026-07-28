@@ -5,7 +5,7 @@ struct SetupGuideView: View {
         "Enable Continuity Camera on your iPhone.",
         "Ensure both devices share the same Apple ID.",
         "Connect to the same Wi-Fi network.",
-        "Click Connect iPhone to begin pairing."
+        "Click Connect Camera. The Mac camera is used as fallback."
     ]
 
     var body: some View {

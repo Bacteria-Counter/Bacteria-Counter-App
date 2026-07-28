@@ -6,6 +6,7 @@ import SwiftUI
 final class MainViewModel: ObservableObject {
     @Published private(set) var appState: AppState = .disconnected
     @Published private(set) var deviceName: String?
+    @Published private(set) var deviceType: String?
     @Published private(set) var isConnecting = false
     @Published private(set) var isCapturing = false
     @Published private(set) var capturedImage: NSImage?
@@ -53,12 +54,11 @@ final class MainViewModel: ObservableObject {
         Task {
             do {
                 try await cameraService.startSession()
-                guard let connectedDeviceName =
-                    cameraService.connectedDeviceName ?? cameraService.discoverContinuityCamera()
-                else {
+                guard let connectedDeviceName = cameraService.connectedDeviceName else {
                     throw CameraService.CameraError.noDeviceFound
                 }
                 deviceName = connectedDeviceName
+                deviceType = cameraService.connectedDeviceType
                 appState = .connected
             } catch {
                 connectionError = error.localizedDescription

@@ -9,6 +9,7 @@ struct SidebarView: View {
                 SidebarSection(title: "DEVICE") {
                     DeviceCard(
                         deviceName: viewModel.deviceName,
+                        deviceType: viewModel.deviceType,
                         isConnected: viewModel.isDeviceConnected
                     )
                 }
@@ -93,7 +94,7 @@ struct SidebarView: View {
             switch viewModel.appState {
             case .disconnected:
                 PrimaryButton(
-                    title: "Connect iPhone",
+                    title: "Connect Camera",
                     icon: "wifi",
                     isLoading: viewModel.isConnecting,
                     action: viewModel.connectDevice

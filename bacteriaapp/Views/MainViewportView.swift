@@ -33,7 +33,7 @@ struct MainViewportView: View {
             CentralMessageView(
                 icon: "camera",
                 title: "No Camera Connected",
-                description: "Connect your iPhone via Continuity Camera to begin capturing agar plate images for ML analysis."
+                description: "Connect your iPhone via Continuity Camera. If unavailable, the Mac camera will be used automatically."
             )
 
             SetupGuideView()

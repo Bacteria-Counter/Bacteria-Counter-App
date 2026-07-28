@@ -20,7 +20,14 @@
       "layers" : [
         {
           "image-name" : "icon.png",
-          "name" : "icon"
+          "name" : "icon",
+          "position" : {
+            "scale" : 0.85,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
         }
       ],
       "shadow" : {

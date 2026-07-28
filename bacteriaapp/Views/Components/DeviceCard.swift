@@ -2,21 +2,22 @@ import SwiftUI
 
 struct DeviceCard: View {
     let deviceName: String?
+    let deviceType: String?
     let isConnected: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: isConnected ? "iphone.radiowaves.left.and.right" : "wifi")
+            Image(systemName: isConnected ? "video.fill" : "wifi")
                 .font(.system(size: 18))
                 .foregroundStyle(isConnected ? AppTheme.accentGreen : AppTheme.textMuted)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(isConnected ? deviceName ?? "iPhone" : "Not Connected")
+                Text(isConnected ? deviceName ?? "Camera" : "Not Connected")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(isConnected ? AppTheme.textPrimary : AppTheme.textSecondary)
 
-                Text(isConnected ? "Continuity Camera" : "Connect Your Phone")
+                Text(isConnected ? deviceType ?? "Camera" : "Connect a camera")
                     .font(AppTheme.monoSmall)
                     .foregroundStyle(AppTheme.textMuted)
             }
@@ -40,8 +41,8 @@ struct DeviceCard: View {
 
 #Preview {
     VStack(spacing: 16) {
-        DeviceCard(deviceName: nil, isConnected: false)
-        DeviceCard(deviceName: "iPhone 15 Pro", isConnected: true)
+        DeviceCard(deviceName: nil, deviceType: nil, isConnected: false)
+        DeviceCard(deviceName: "iPhone 15 Pro", deviceType: "Continuity Camera", isConnected: true)
     }
     .padding()
     .frame(width: 240)
