@@ -53,10 +53,12 @@ final class MainViewModel: ObservableObject {
         Task {
             do {
                 try await cameraService.startSession()
-                deviceName = cameraService.connectedDeviceName ?? cameraService.discoverContinuityCamera()
-                if deviceName == nil {
-                    deviceName = "iPhone"
+                guard let connectedDeviceName =
+                    cameraService.connectedDeviceName ?? cameraService.discoverContinuityCamera()
+                else {
+                    throw CameraService.CameraError.noDeviceFound
                 }
+                deviceName = connectedDeviceName
                 appState = .connected
             } catch {
                 connectionError = error.localizedDescription

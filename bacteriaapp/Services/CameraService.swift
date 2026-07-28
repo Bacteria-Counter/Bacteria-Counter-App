@@ -1,3 +1,4 @@
+@preconcurrency
 import AVFoundation
 import AppKit
 import Combine
@@ -16,23 +17,7 @@ final class CameraService: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.ameliacitra.bacteriaapp.camera.session")
 
     func discoverContinuityCamera() -> String? {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [
-                .external,
-                .continuityCamera,
-                .builtInWideAngleCamera
-            ],
-            mediaType: .video,
-            position: .unspecified
-        )
-
-        let external = discovery.devices.first { device in
-            device.deviceType == .continuityCamera ||
-            device.deviceType == .external ||
-            device.localizedName.localizedCaseInsensitiveContains("iPhone")
-        }
-
-        return external?.localizedName
+        discoverIPhoneCamera()?.localizedName
     }
 
     func startSession() async throws {
@@ -49,17 +34,7 @@ final class CameraService: NSObject, ObservableObject {
             return
         }
 
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.continuityCamera, .external, .builtInWideAngleCamera],
-            mediaType: .video,
-            position: .unspecified
-        )
-
-        guard let device = discovery.devices.first(where: {
-            $0.deviceType == .continuityCamera ||
-            $0.deviceType == .external ||
-            $0.localizedName.localizedCaseInsensitiveContains("iPhone")
-        }) ?? discovery.devices.first else {
+        guard let device = discoverIPhoneCamera() else {
             throw CameraError.noDeviceFound
         }
 
@@ -87,6 +62,23 @@ final class CameraService: NSObject, ObservableObject {
             }
         }
         isSessionRunning = true
+    }
+
+    private func discoverIPhoneCamera() -> AVCaptureDevice? {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.continuityCamera, .external],
+            mediaType: .video,
+            position: .unspecified
+        )
+
+        // Prefer a device explicitly identified by AVFoundation as Continuity
+        // Camera. The name check keeps compatibility with iPhones that macOS
+        // reports as a generic external camera.
+        return discovery.devices.first(where: {
+            $0.deviceType == .continuityCamera
+        }) ?? discovery.devices.first(where: {
+            $0.localizedName.localizedCaseInsensitiveContains("iPhone")
+        })
     }
 
     func stopSession() {
@@ -135,7 +127,7 @@ final class CameraService: NSObject, ObservableObject {
 
         var errorDescription: String? {
             switch self {
-            case .noDeviceFound: "No Continuity Camera device found"
+            case .noDeviceFound: "No iPhone Continuity Camera found. Connect an iPhone to continue."
             case .cannotAddInput: "Cannot add camera input"
             case .cannotAddOutput: "Cannot add photo output"
             case .notConnected: "Camera is not connected"
