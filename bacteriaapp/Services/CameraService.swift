@@ -10,6 +10,7 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var connectedDeviceName: String?
     @Published private(set) var connectedDeviceType: String?
     @Published private(set) var previewSession: AVCaptureSession?
+    @Published private(set) var captureSettings = CaptureSettings.unavailable
 
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
@@ -66,6 +67,10 @@ final class CameraService: NSObject, ObservableObject {
         guard session.canAddOutput(output) else { throw CameraError.cannotAddOutput }
         session.addOutput(output)
 
+        if let maximumDimensions = Self.maximumPhotoDimensions(for: device.activeFormat) {
+            output.maxPhotoDimensions = maximumDimensions
+        }
+
         await withCheckedContinuation { continuation in
             sessionQueue.async {
                 session.startRunning()
@@ -83,6 +88,7 @@ final class CameraService: NSObject, ObservableObject {
         connectedDeviceName = device.localizedName
         connectedDeviceType = type
         previewSession = session
+        captureSettings = Self.captureSettings(for: device, output: output)
         isSessionRunning = true
     }
 
@@ -124,6 +130,7 @@ final class CameraService: NSObject, ObservableObject {
         connectedDeviceName = nil
         connectedDeviceType = nil
         previewSession = nil
+        captureSettings = .unavailable
         isSessionRunning = false
     }
 
@@ -139,7 +146,10 @@ final class CameraService: NSObject, ObservableObject {
             }
             inFlightCaptureDelegate = delegate
 
-            let settings = Self.makePhotoSettings(for: photoOutput)
+            let settings = Self.makePhotoSettings(
+                for: photoOutput,
+                device: currentDevice
+            )
 
             sessionQueue.async {
                 photoOutput.capturePhoto(with: settings, delegate: delegate)
@@ -147,14 +157,121 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    private static func makePhotoSettings(for output: AVCapturePhotoOutput) -> AVCapturePhotoSettings {
+    private static func makePhotoSettings(
+        for output: AVCapturePhotoOutput,
+        device: AVCaptureDevice?
+    ) -> AVCapturePhotoSettings {
+        let settings: AVCapturePhotoSettings
+
         if output.availablePhotoCodecTypes.contains(.jpeg) {
-            return AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            settings = AVCapturePhotoSettings(
+                format: [AVVideoCodecKey: AVVideoCodecType.jpeg]
+            )
+        } else if let codec = output.availablePhotoCodecTypes.first {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
+        } else {
+            settings = AVCapturePhotoSettings()
         }
-        if let codec = output.availablePhotoCodecTypes.first {
-            return AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
+
+        let dimensions = output.maxPhotoDimensions
+        if dimensions.width > 0, dimensions.height > 0 {
+            settings.maxPhotoDimensions = dimensions
         }
-        return AVCapturePhotoSettings()
+
+        if let device, let flashMode = preferredFlashMode(for: device, output: output) {
+            settings.flashMode = flashMode
+        }
+
+        return settings
+    }
+
+    private static func maximumPhotoDimensions(
+        for format: AVCaptureDevice.Format
+    ) -> CMVideoDimensions? {
+        format.supportedMaxPhotoDimensions
+            .filter { $0.width > 0 && $0.height > 0 }
+            .max {
+                Int64($0.width) * Int64($0.height)
+                    < Int64($1.width) * Int64($1.height)
+            }
+    }
+
+    private static func captureSettings(
+        for device: AVCaptureDevice,
+        output: AVCapturePhotoOutput
+    ) -> CaptureSettings {
+        guard device.isContinuityCamera else {
+            return .unavailable
+        }
+
+        let dimensions = output.maxPhotoDimensions
+        let resolution = if dimensions.width > 0, dimensions.height > 0 {
+            "\(dimensions.width)×\(dimensions.height)"
+        } else {
+            "-"
+        }
+
+        let flash = preferredFlashMode(for: device, output: output)
+            .map(flashDescription) ?? "-"
+
+        let supportedFocusModes: [AVCaptureDevice.FocusMode] = [
+            .locked,
+            .autoFocus,
+            .continuousAutoFocus
+        ]
+        let focus = supportedFocusModes.contains(where: device.isFocusModeSupported)
+            ? focusDescription(device.focusMode)
+            : "-"
+
+        // AVFoundation doesn't expose AVCaptureDevice.videoZoomFactor on macOS.
+        return CaptureSettings(
+            resolution: resolution,
+            flash: flash,
+            zoom: "-",
+            focus: focus
+        )
+    }
+
+    private static func preferredFlashMode(
+        for device: AVCaptureDevice,
+        output: AVCapturePhotoOutput
+    ) -> AVCaptureDevice.FlashMode? {
+        guard device.hasFlash, device.isFlashAvailable else {
+            return nil
+        }
+
+        if output.supportedFlashModes.contains(.auto) {
+            return .auto
+        }
+        if output.supportedFlashModes.contains(.on) {
+            return .on
+        }
+        if output.supportedFlashModes.contains(.off) {
+            return .off
+        }
+        return nil
+    }
+
+    private static func flashDescription(
+        _ mode: AVCaptureDevice.FlashMode
+    ) -> String {
+        switch mode {
+        case .off: "Off"
+        case .on: "On"
+        case .auto: "Auto"
+        @unknown default: "-"
+        }
+    }
+
+    private static func focusDescription(
+        _ mode: AVCaptureDevice.FocusMode
+    ) -> String {
+        switch mode {
+        case .locked: "Locked"
+        case .autoFocus: "Auto"
+        case .continuousAutoFocus: "Continuous"
+        @unknown default: "-"
+        }
     }
 
     enum CameraError: LocalizedError {

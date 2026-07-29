@@ -7,11 +7,13 @@ enum AppState: Equatable {
     case complete
 }
 
-struct CaptureSettings {
-    var resolution: String = "12 MP"
-    var flash: String = "Auto"
-    var zoom: String = "1.0×"
-    var focus: String = "Macro"
+struct CaptureSettings: Equatable {
+    var resolution: String = "-"
+    var flash: String = "-"
+    var zoom: String = "-"
+    var focus: String = "-"
+
+    static let unavailable = CaptureSettings()
 }
 
 struct AnalysisResult: Equatable {

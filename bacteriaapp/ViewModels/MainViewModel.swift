@@ -13,7 +13,7 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var colonyCount: Int = 0
     @Published private(set) var analysisProgress: Double = 0
     @Published private(set) var analysisResult: AnalysisResult?
-    @Published var captureSettings = CaptureSettings()
+    @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
 
     let cameraService = CameraService()
@@ -59,6 +59,7 @@ final class MainViewModel: ObservableObject {
                 }
                 deviceName = connectedDeviceName
                 deviceType = cameraService.connectedDeviceType
+                captureSettings = cameraService.captureSettings
                 appState = .connected
             } catch {
                 connectionError = error.localizedDescription
