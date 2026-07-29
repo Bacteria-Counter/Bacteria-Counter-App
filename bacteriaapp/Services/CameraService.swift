@@ -87,27 +87,21 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     private func cameraCandidates() -> [(device: AVCaptureDevice, type: String)] {
-        let iPhoneDiscovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.continuityCamera, .external],
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.continuityCamera, .external, .builtInWideAngleCamera],
             mediaType: .video,
             position: .unspecified
         )
 
-        // Prefer a device explicitly identified by AVFoundation as Continuity
-        // Camera. The name check keeps compatibility with iPhones that macOS
-        // reports as a generic external camera.
-        let iPhone = iPhoneDiscovery.devices.first(where: {
-            $0.deviceType == .continuityCamera
-        }) ?? iPhoneDiscovery.devices.first(where: {
-            $0.localizedName.localizedCaseInsensitiveContains("iPhone")
+        // isContinuityCamera remains reliable even if an older configuration
+        // reports the iPhone using a generic or built-in device type.
+        let iPhone = discovery.devices.first(where: {
+            $0.isContinuityCamera
         })
 
-        let builtInDiscovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera],
-            mediaType: .video,
-            position: .unspecified
-        )
-        let builtIn = builtInDiscovery.devices.first
+        let builtIn = discovery.devices.first(where: {
+            !$0.isContinuityCamera && $0.deviceType == .builtInWideAngleCamera
+        })
 
         return [
             iPhone.map { ($0, "Continuity Camera") },
