@@ -6,6 +6,7 @@ import Foundation
 nonisolated struct ColonyAnalysis: Sendable {
     let totalColonies: Int
     let averageConfidence: Int
+    let boundingBoxes: [ColonyBox]
 }
 
 nonisolated enum ColonyAnalysisError: LocalizedError {
@@ -60,8 +61,11 @@ actor ColonyAnalysisService {
         let plateRoiTargetSize: Int
         let plateCropPaddingRatio: Double
         let plateCountingScale: Double
+        let flatfieldSigmaRatio: Double
         let safeErodeRatio: Double
         let safeMinimumFraction: Double
+        let flatfieldPercentileLow: Double
+        let flatfieldPercentileHigh: Double
 
         func validate() throws {
             guard plateInputSize > 0 else {
@@ -82,6 +86,14 @@ actor ColonyAnalysisService {
             guard plateRoiTargetSize > 0, plateCountingScale > 0 else {
                 throw ColonyAnalysisError.invalidParameters(
                     "plate ROI size and counting scale must be positive"
+                )
+            }
+            guard flatfieldSigmaRatio > 0,
+                  flatfieldPercentileLow >= 0,
+                  flatfieldPercentileHigh <= 100,
+                  flatfieldPercentileLow < flatfieldPercentileHigh else {
+                throw ColonyAnalysisError.invalidParameters(
+                    "flat-field sigma and percentile range are invalid"
                 )
             }
             guard imagenetMean.count >= 3, imagenetStd.count >= 3,
@@ -106,8 +118,15 @@ actor ColonyAnalysisService {
     private struct PlateMask {
         let width: Int
         let height: Int
-        let safePixels: [UInt8]
-        let bounds: PixelRect
+        let ellipse: PlateEllipse
+    }
+
+    private struct PlateEllipse {
+        let centerX: Double
+        let centerY: Double
+        let axis1: Double
+        let axis2: Double
+        let angle: Double
     }
 
     private struct RGBAImage {
@@ -142,8 +161,6 @@ actor ColonyAnalysisService {
                 }
 
                 context.interpolationQuality = .high
-                context.translateBy(x: 0, y: CGFloat(height))
-                context.scaleBy(x: 1, y: -1)
                 context.draw(
                     cgImage,
                     in: CGRect(x: 0, y: 0, width: width, height: height)
@@ -164,6 +181,25 @@ actor ColonyAnalysisService {
             self.width = width
             self.height = height
             self.pixels = pixels
+        }
+
+        init(grayscale: [UInt8], width: Int, height: Int) throws {
+            guard width > 0,
+                  height > 0,
+                  grayscale.count == width * height else {
+                throw ColonyAnalysisError.imageProcessingFailed(
+                    "invalid flat-field grayscale dimensions"
+                )
+            }
+            var pixels = [UInt8](repeating: 255, count: width * height * 4)
+            for index in grayscale.indices {
+                let destination = index * 4
+                let value = grayscale[index]
+                pixels[destination] = value
+                pixels[destination + 1] = value
+                pixels[destination + 2] = value
+            }
+            self.init(width: width, height: height, pixels: pixels)
         }
 
         func resized(
@@ -313,14 +349,10 @@ actor ColonyAnalysisService {
 
         let plateMask = try makePlateMask(
             probability: probability,
-            threshold: parameters.plateThreshold,
-            erodeRatio: parameters.safeErodeRatio,
-            minimumFraction: parameters.safeMinimumFraction
+            threshold: parameters.plateThreshold
         )
         let plateCrop = makePlateCrop(
-            maskBounds: plateMask.bounds,
-            maskWidth: plateMask.width,
-            maskHeight: plateMask.height,
+            plateMask: plateMask,
             sourceWidth: sourceImage.width,
             sourceHeight: sourceImage.height,
             paddingRatio: parameters.plateCropPaddingRatio
@@ -328,21 +360,43 @@ actor ColonyAnalysisService {
 
         let roiSize = max(
             parameters.colonyTileSize,
-            Int(
-                (
-                    Double(parameters.plateRoiTargetSize)
-                        * parameters.plateCountingScale
-                ).rounded()
+            parameters.plateRoiTargetSize
+        )
+        let rawPlateImage = try sourceImage.resized(
+            crop: plateCrop,
+            width: roiSize,
+            height: roiSize
+        )
+        let countingMask = makeCountingMask(
+            plateMask: plateMask,
+            plateCrop: plateCrop,
+            sourceWidth: sourceImage.width,
+            sourceHeight: sourceImage.height,
+            roiSize: roiSize,
+            countingScale: parameters.plateCountingScale
+        )
+        let flatField = try FlatFieldNormalizer.normalize(
+            rgba: rawPlateImage.pixels,
+            width: roiSize,
+            height: roiSize,
+            countingMask: countingMask,
+            configuration: FlatFieldNormalizer.Configuration(
+                safeErodeRatio: parameters.safeErodeRatio,
+                safeMinimumFraction: parameters.safeMinimumFraction,
+                outlierMADMultiplier: 3.5,
+                sigmaRatio: parameters.flatfieldSigmaRatio,
+                percentileLow: parameters.flatfieldPercentileLow,
+                percentileHigh: parameters.flatfieldPercentileHigh
             )
         )
-        let plateImage = try sourceImage.resized(
-            crop: plateCrop,
+        let plateImage = try RGBAImage(
+            grayscale: flatField,
             width: roiSize,
             height: roiSize
         )
 
         try Task.checkCancellation()
-        await progress(0.15, 0)
+        await progress(0.18, 0)
 
         let xOrigins = CenterNetDecoder.tileOrigins(
             length: roiSize,
@@ -411,42 +465,48 @@ actor ColonyAnalysisService {
 
                 let interim = filteredAndMergedBoxes(
                     allBoxes,
-                    plateMask: plateMask,
-                    plateCrop: plateCrop,
-                    sourceWidth: sourceImage.width,
-                    sourceHeight: sourceImage.height,
+                    countingMask: countingMask,
                     roiSize: roiSize,
-                    iouThreshold: parameters.globalNmsIou
+                    iouThreshold: parameters.globalNmsIou,
+                    duplicateCenterDistance: Double(
+                        parameters.colonyOutputStride
+                    ) * 1.5
                 )
                 let fraction = Double(completedTiles) / Double(max(1, totalTiles))
-                await progress(0.15 + fraction * 0.80, interim.count)
+                await progress(0.18 + fraction * 0.77, interim.count)
             }
         }
 
         try Task.checkCancellation()
         let boxes = filteredAndMergedBoxes(
             allBoxes,
-            plateMask: plateMask,
-            plateCrop: plateCrop,
-            sourceWidth: sourceImage.width,
-            sourceHeight: sourceImage.height,
+            countingMask: countingMask,
             roiSize: roiSize,
-            iouThreshold: parameters.globalNmsIou
+            iouThreshold: parameters.globalNmsIou,
+            duplicateCenterDistance: Double(parameters.colonyOutputStride) * 1.5
         )
-        let confidence = boxes.isEmpty
+        let sourceBoxes = mapBoxesToSourceImage(
+            boxes,
+            plateCrop: plateCrop,
+            roiSize: roiSize,
+            sourceWidth: sourceImage.width,
+            sourceHeight: sourceImage.height
+        )
+        let confidence = sourceBoxes.isEmpty
             ? 0
             : Int(
                 (
-                    boxes.reduce(0.0) { $0 + $1.score }
-                        / Double(boxes.count)
-                        * 100
+                    sourceBoxes.reduce(0.0) { $0 + $1.score }
+                        / Double(sourceBoxes.count)
+                    * 100
                 ).rounded()
             )
 
-        await progress(1.0, boxes.count)
+        await progress(1.0, sourceBoxes.count)
         return ColonyAnalysis(
-            totalColonies: boxes.count,
-            averageConfidence: confidence
+            totalColonies: sourceBoxes.count,
+            averageConfidence: confidence,
+            boundingBoxes: sourceBoxes
         )
     }
 
@@ -523,9 +583,7 @@ actor ColonyAnalysisService {
 
     private func makePlateMask(
         probability: MLMultiArray,
-        threshold: Double,
-        erodeRatio: Double,
-        minimumFraction: Double
+        threshold: Double
     ) throws -> PlateMask {
         guard probability.shape.count == 4 else {
             throw ColonyAnalysisError.invalidModelOutput(
@@ -555,7 +613,6 @@ actor ColonyAnalysisService {
         var nextLabel: Int32 = 0
         var bestLabel: Int32 = 0
         var bestCount = 0
-        var bestBounds = PixelRect(x: 0, y: 0, width: 0, height: 0)
         var queue: [Int] = []
         queue.reserveCapacity(foreground.count)
 
@@ -566,10 +623,6 @@ actor ColonyAnalysisService {
             queue.append(start)
             var queueIndex = 0
             var count = 0
-            var minX = width
-            var minY = height
-            var maxX = 0
-            var maxY = 0
 
             while queueIndex < queue.count {
                 let index = queue[queueIndex]
@@ -577,10 +630,6 @@ actor ColonyAnalysisService {
                 count += 1
                 let x = index % width
                 let y = index / width
-                minX = min(minX, x)
-                minY = min(minY, y)
-                maxX = max(maxX, x)
-                maxY = max(maxY, y)
 
                 if x > 0 {
                     appendPixel(
@@ -623,12 +672,6 @@ actor ColonyAnalysisService {
             if count > bestCount {
                 bestCount = count
                 bestLabel = nextLabel
-                bestBounds = PixelRect(
-                    x: minX,
-                    y: minY,
-                    width: maxX - minX + 1,
-                    height: maxY - minY + 1
-                )
             }
         }
 
@@ -636,26 +679,48 @@ actor ColonyAnalysisService {
             throw ColonyAnalysisError.plateNotDetected
         }
 
-        let largestComponent: [UInt8] = labels.map { $0 == bestLabel ? 1 : 0 }
-        let radius = max(
-            0,
-            Int((Double(min(width, height)) * max(0, erodeRatio)).rounded())
+        let largestComponent: [UInt8] = labels.map {
+            $0 == bestLabel ? 1 : 0
+        }
+        let closeRadius = max(
+            2,
+            Int((Double(min(width, height)) * 0.006).rounded())
         )
-        let eroded = erode(
-            mask: largestComponent,
+        let closed = erode(
+            mask: dilate(
+                mask: largestComponent,
+                width: width,
+                height: height,
+                radius: closeRadius
+            ),
             width: width,
             height: height,
-            radius: radius
+            radius: closeRadius
         )
-        let erodedCount = eroded.reduce(0) { $0 + Int($1) }
-        let requiredCount = Int(Double(bestCount) * max(0, minimumFraction))
-        let safePixels = erodedCount >= requiredCount ? eroded : largestComponent
+        let filled = fillHoles(
+            mask: closed,
+            width: width,
+            height: height
+        )
+        let filledCount = filled.reduce(0) { $0 + Int($1) }
+        guard Double(filledCount) / Double(width * height) >= 0.05 else {
+            throw ColonyAnalysisError.plateNotDetected
+        }
+        let ellipse = try fitPlateEllipse(
+            mask: filled,
+            width: width,
+            height: height
+        )
+        let axisRatio = min(ellipse.axis1, ellipse.axis2)
+            / max(ellipse.axis1, ellipse.axis2)
+        guard axisRatio >= 0.55 else {
+            throw ColonyAnalysisError.plateNotDetected
+        }
 
         return PlateMask(
             width: width,
             height: height,
-            safePixels: safePixels,
-            bounds: bestBounds
+            ellipse: ellipse
         )
     }
 
@@ -720,26 +785,154 @@ actor ColonyAnalysisService {
         return result
     }
 
+    private func dilate(
+        mask: [UInt8],
+        width: Int,
+        height: Int,
+        radius: Int
+    ) -> [UInt8] {
+        guard radius > 0 else { return mask }
+        let prefixWidth = width + 1
+        var prefix = [Int](repeating: 0, count: prefixWidth * (height + 1))
+        for y in 0..<height {
+            var rowSum = 0
+            for x in 0..<width {
+                rowSum += Int(mask[y * width + x])
+                prefix[(y + 1) * prefixWidth + x + 1] =
+                    prefix[y * prefixWidth + x + 1] + rowSum
+            }
+        }
+
+        var result = [UInt8](repeating: 0, count: mask.count)
+        for y in 0..<height {
+            for x in 0..<width {
+                let x1 = max(0, x - radius)
+                let y1 = max(0, y - radius)
+                let x2 = min(width, x + radius + 1)
+                let y2 = min(height, y + radius + 1)
+                let sum = prefix[y2 * prefixWidth + x2]
+                    - prefix[y1 * prefixWidth + x2]
+                    - prefix[y2 * prefixWidth + x1]
+                    + prefix[y1 * prefixWidth + x1]
+                if sum > 0 {
+                    result[y * width + x] = 1
+                }
+            }
+        }
+        return result
+    }
+
+    private func fillHoles(
+        mask: [UInt8],
+        width: Int,
+        height: Int
+    ) -> [UInt8] {
+        var exterior = [UInt8](repeating: 0, count: mask.count)
+        var queue: [Int] = []
+        queue.reserveCapacity(mask.count)
+
+        func enqueue(_ index: Int) {
+            guard mask[index] == 0, exterior[index] == 0 else { return }
+            exterior[index] = 1
+            queue.append(index)
+        }
+
+        for x in 0..<width {
+            enqueue(x)
+            enqueue((height - 1) * width + x)
+        }
+        for y in 0..<height {
+            enqueue(y * width)
+            enqueue(y * width + width - 1)
+        }
+
+        var queueIndex = 0
+        while queueIndex < queue.count {
+            let index = queue[queueIndex]
+            queueIndex += 1
+            let x = index % width
+            let y = index / width
+            if x > 0 { enqueue(index - 1) }
+            if x + 1 < width { enqueue(index + 1) }
+            if y > 0 { enqueue(index - width) }
+            if y + 1 < height { enqueue(index + width) }
+        }
+
+        return mask.indices.map { index in
+            mask[index] != 0 || exterior[index] == 0 ? 1 : 0
+        }
+    }
+
+    private func fitPlateEllipse(
+        mask: [UInt8],
+        width: Int,
+        height: Int
+    ) throws -> PlateEllipse {
+        var count = 0.0
+        var sumX = 0.0
+        var sumY = 0.0
+        for index in mask.indices where mask[index] != 0 {
+            count += 1
+            sumX += Double(index % width) + 0.5
+            sumY += Double(index / width) + 0.5
+        }
+        guard count >= 20 else {
+            throw ColonyAnalysisError.plateNotDetected
+        }
+
+        let centerX = sumX / count
+        let centerY = sumY / count
+        var covarianceXX = 0.0
+        var covarianceYY = 0.0
+        var covarianceXY = 0.0
+        for index in mask.indices where mask[index] != 0 {
+            let dx = Double(index % width) + 0.5 - centerX
+            let dy = Double(index / width) + 0.5 - centerY
+            covarianceXX += dx * dx
+            covarianceYY += dy * dy
+            covarianceXY += dx * dy
+        }
+        covarianceXX /= count
+        covarianceYY /= count
+        covarianceXY /= count
+
+        let difference = covarianceXX - covarianceYY
+        let discriminant = sqrt(
+            max(0, difference * difference + 4 * covarianceXY * covarianceXY)
+        )
+        let largestEigenvalue = max(
+            1,
+            (covarianceXX + covarianceYY + discriminant) * 0.5
+        )
+        let smallestEigenvalue = max(
+            1,
+            (covarianceXX + covarianceYY - discriminant) * 0.5
+        )
+        return PlateEllipse(
+            centerX: centerX,
+            centerY: centerY,
+            axis1: 4 * sqrt(largestEigenvalue),
+            axis2: 4 * sqrt(smallestEigenvalue),
+            angle: 0.5 * atan2(2 * covarianceXY, difference)
+        )
+    }
+
     private func makePlateCrop(
-        maskBounds: PixelRect,
-        maskWidth: Int,
-        maskHeight: Int,
+        plateMask: PlateMask,
         sourceWidth: Int,
         sourceHeight: Int,
         paddingRatio: Double
     ) -> PixelRect {
-        let xScale = Double(sourceWidth) / Double(maskWidth)
-        let yScale = Double(sourceHeight) / Double(maskHeight)
-        let sourceMinX = Double(maskBounds.x) * xScale
-        let sourceMinY = Double(maskBounds.y) * yScale
-        let sourceMaxX = Double(maskBounds.maxX) * xScale
-        let sourceMaxY = Double(maskBounds.maxY) * yScale
-        let centerX = (sourceMinX + sourceMaxX) * 0.5
-        let centerY = (sourceMinY + sourceMaxY) * 0.5
-        let requestedSide = max(
-            sourceMaxX - sourceMinX,
-            sourceMaxY - sourceMinY
-        ) * max(1, paddingRatio)
+        let xScale = Double(sourceWidth) / Double(plateMask.width)
+        let yScale = Double(sourceHeight) / Double(plateMask.height)
+        let centerX = plateMask.ellipse.centerX * xScale
+        let centerY = plateMask.ellipse.centerY * yScale
+        let majorAxis = max(
+            plateMask.ellipse.axis1,
+            plateMask.ellipse.axis2
+        )
+        let requestedSide = max(majorAxis * xScale, majorAxis * yScale)
+            * max(1, paddingRatio)
         let side = max(
             1,
             min(Int(requestedSide.rounded(.up)), min(sourceWidth, sourceHeight))
@@ -755,33 +948,100 @@ actor ColonyAnalysisService {
         return PixelRect(x: x, y: y, width: side, height: side)
     }
 
-    private func filteredAndMergedBoxes(
-        _ boxes: [ColonyBox],
+    private func makeCountingMask(
         plateMask: PlateMask,
         plateCrop: PixelRect,
         sourceWidth: Int,
         sourceHeight: Int,
         roiSize: Int,
-        iouThreshold: Double
-    ) -> [ColonyBox] {
-        let insidePlate = boxes.filter { box in
-            let sourceX = Double(plateCrop.x)
-                + box.centerX / Double(roiSize) * Double(plateCrop.width)
-            let sourceY = Double(plateCrop.y)
-                + box.centerY / Double(roiSize) * Double(plateCrop.height)
-            let maskX = min(
-                plateMask.width - 1,
-                max(0, Int(sourceX / Double(sourceWidth) * Double(plateMask.width)))
-            )
-            let maskY = min(
-                plateMask.height - 1,
-                max(0, Int(sourceY / Double(sourceHeight) * Double(plateMask.height)))
-            )
-            return plateMask.safePixels[maskY * plateMask.width + maskX] != 0
+        countingScale: Double
+    ) -> [UInt8] {
+        let ellipse = plateMask.ellipse
+        let cosine = cos(ellipse.angle)
+        let sine = sin(ellipse.angle)
+        let semiAxis1 = max(1, ellipse.axis1 * countingScale * 0.5)
+        let semiAxis2 = max(1, ellipse.axis2 * countingScale * 0.5)
+        let maskXScale = Double(plateMask.width) / Double(sourceWidth)
+        let maskYScale = Double(plateMask.height) / Double(sourceHeight)
+        let cropX = Double(plateCrop.x)
+        let cropY = Double(plateCrop.y)
+        let cropWidth = Double(plateCrop.width)
+        let cropHeight = Double(plateCrop.height)
+        let roi = Double(roiSize)
+        var output = [UInt8](repeating: 0, count: roiSize * roiSize)
+
+        for y in 0..<roiSize {
+            let sourceY = cropY + (Double(y) + 0.5) / roi * cropHeight
+            let maskY = sourceY * maskYScale
+            for x in 0..<roiSize {
+                let sourceX = cropX + (Double(x) + 0.5) / roi * cropWidth
+                let maskX = sourceX * maskXScale
+                let dx = maskX - ellipse.centerX
+                let dy = maskY - ellipse.centerY
+                let rotatedX = dx * cosine + dy * sine
+                let rotatedY = -dx * sine + dy * cosine
+                let normalizedRadius = rotatedX * rotatedX
+                        / (semiAxis1 * semiAxis1)
+                    + rotatedY * rotatedY / (semiAxis2 * semiAxis2)
+                if normalizedRadius <= 1 {
+                    output[y * roiSize + x] = 1
+                }
+            }
         }
-        return CenterNetDecoder.nonMaximumSuppression(
-            insidePlate,
+        return output
+    }
+
+    private func filteredAndMergedBoxes(
+        _ boxes: [ColonyBox],
+        countingMask: [UInt8],
+        roiSize: Int,
+        iouThreshold: Double,
+        duplicateCenterDistance: Double
+    ) -> [ColonyBox] {
+        let merged = CenterNetDecoder.nonMaximumSuppression(
+            boxes,
             iouThreshold: iouThreshold
         )
+        let withoutNearbyDuplicates = CenterNetDecoder.suppressNearbyCenters(
+            merged,
+            minimumDistance: duplicateCenterDistance
+        )
+        return CenterNetDecoder.keepCentersInsideMask(
+            withoutNearbyDuplicates,
+            mask: countingMask,
+            width: roiSize,
+            height: roiSize
+        )
+    }
+
+    private func mapBoxesToSourceImage(
+        _ boxes: [ColonyBox],
+        plateCrop: PixelRect,
+        roiSize: Int,
+        sourceWidth: Int,
+        sourceHeight: Int
+    ) -> [ColonyBox] {
+        let xScale = Double(plateCrop.width) / Double(roiSize)
+        let yScale = Double(plateCrop.height) / Double(roiSize)
+        let cropX = Double(plateCrop.x)
+        let cropY = Double(plateCrop.y)
+        let maximumX = Double(sourceWidth)
+        let maximumY = Double(sourceHeight)
+
+        return boxes.compactMap { box in
+            let x1 = min(maximumX, max(0, cropX + box.x1 * xScale))
+            let y1 = min(maximumY, max(0, cropY + box.y1 * yScale))
+            let x2 = min(maximumX, max(0, cropX + box.x2 * xScale))
+            let y2 = min(maximumY, max(0, cropY + box.y2 * yScale))
+
+            guard x2 > x1, y2 > y1 else { return nil }
+            return ColonyBox(
+                x1: x1,
+                y1: y1,
+                x2: x2,
+                y2: y2,
+                score: box.score
+            )
+        }
     }
 }

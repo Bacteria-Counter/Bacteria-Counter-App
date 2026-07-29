@@ -45,14 +45,23 @@ final class CameraPreviewNSView: NSView {
 
 struct CapturedImageView: View {
     let image: NSImage
+    let boxes: [ColonyBox]
+    let imageSize: CGSize
 
     var body: some View {
         GeometryReader { geometry in
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .clipped()
+            ZStack {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+
+                ColonyBoundingBoxOverlay(
+                    boxes: boxes,
+                    imageSize: imageSize
+                )
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
     }
 }

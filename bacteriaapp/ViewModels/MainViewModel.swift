@@ -11,6 +11,8 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var isCapturing = false
     @Published private(set) var capturedImage: NSImage?
     @Published private(set) var colonyCount: Int = 0
+    @Published private(set) var colonyBoxes: [ColonyBox] = []
+    @Published private(set) var analysisImageSize: CGSize = .zero
     @Published private(set) var analysisProgress: Double = 0
     @Published private(set) var analysisResult: AnalysisResult?
     @Published private(set) var captureSettings = CaptureSettings.unavailable
@@ -120,6 +122,8 @@ final class MainViewModel: ObservableObject {
         analysisTask = nil
         capturedImage = nil
         colonyCount = 0
+        colonyBoxes = []
+        analysisImageSize = .zero
         analysisProgress = 0
         analysisResult = nil
         appState = standbyState
@@ -134,6 +138,11 @@ final class MainViewModel: ObservableObject {
 
         appState = .analyzing
         colonyCount = 0
+        colonyBoxes = []
+        analysisImageSize = CGSize(
+            width: cgImage.width,
+            height: cgImage.height
+        )
         analysisProgress = 0
 
         analysisTask = Task {
@@ -147,6 +156,7 @@ final class MainViewModel: ObservableObject {
 
                 guard !Task.isCancelled else { return }
                 colonyCount = result.totalColonies
+                colonyBoxes = result.boundingBoxes
                 analysisProgress = 1
                 analysisResult = AnalysisResult(
                     totalColonies: result.totalColonies,
@@ -159,6 +169,7 @@ final class MainViewModel: ObservableObject {
                 connectionError = error.localizedDescription
                 analysisProgress = 0
                 colonyCount = 0
+                colonyBoxes = []
                 appState = standbyState
             }
         }

@@ -144,6 +144,26 @@ nonisolated enum CenterNetDecoder {
         return selected
     }
 
+    static func suppressNearbyCenters(
+        _ boxes: [ColonyBox],
+        minimumDistance: Double
+    ) -> [ColonyBox] {
+        guard minimumDistance > 0 else { return boxes }
+        let squaredDistance = minimumDistance * minimumDistance
+        var selected: [ColonyBox] = []
+        for candidate in boxes.sorted(by: { $0.score > $1.score }) {
+            let isDuplicate = selected.contains { existing in
+                let deltaX = candidate.centerX - existing.centerX
+                let deltaY = candidate.centerY - existing.centerY
+                return deltaX * deltaX + deltaY * deltaY <= squaredDistance
+            }
+            if !isDuplicate {
+                selected.append(candidate)
+            }
+        }
+        return selected
+    }
+
     static func keepCentersInsideMask(
         _ boxes: [ColonyBox],
         mask: [UInt8],
