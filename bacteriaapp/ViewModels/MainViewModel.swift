@@ -31,8 +31,10 @@ final class MainViewModel: ObservableObject {
         case .analyzing:
             return "Analyzing · \(Int(analysisProgress * 100))% · \(colonyCount) colonies detected"
         case .complete:
-            let result = analysisResult ?? .sample
-            return "Complete · \(result.totalColonies) colonies · \(result.speciesCount) species · avg conf \(result.averageConfidence)% · \(result.plateType)"
+            guard let result = analysisResult else {
+                return "Analysis complete"
+            }
+            return "Complete · \(result.totalColonies) colonies · avg conf \(result.averageConfidence)%"
         }
     }
 
@@ -45,6 +47,7 @@ final class MainViewModel: ObservableObject {
     }
 
     private var analysisTask: Task<Void, Never>?
+    private let analysisService = ColonyAnalysisService()
 
     func connectDevice() {
         guard appState == .disconnected else { return }
@@ -87,6 +90,31 @@ final class MainViewModel: ObservableObject {
         }
     }
 
+    func uploadPhoto(from url: URL) {
+        guard appState == .disconnected || appState == .connected else { return }
+
+        connectionError = nil
+
+        let hasSecurityScopedAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScopedAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let image = NSImage(contentsOf: url) else {
+            connectionError = "The selected file could not be opened as an image."
+            return
+        }
+
+        capturedImage = image
+        startAnalysis()
+    }
+
+    func handlePhotoUploadError(_ error: Error) {
+        connectionError = "Could not upload photo: \(error.localizedDescription)"
+    }
+
     func newCapture() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -94,35 +122,59 @@ final class MainViewModel: ObservableObject {
         colonyCount = 0
         analysisProgress = 0
         analysisResult = nil
-        appState = .connected
+        appState = standbyState
     }
 
     private func startAnalysis() {
+        guard let capturedImage,
+              let cgImage = Self.cgImage(from: capturedImage) else {
+            connectionError = ColonyAnalysisError.imageConversionFailed.localizedDescription
+            return
+        }
+
         appState = .analyzing
         colonyCount = 0
         analysisProgress = 0
 
-        let targetCount = AnalysisResult.sample.totalColonies
-
         analysisTask = Task {
-            let steps = 40
-            for step in 0...steps {
+            do {
+                let result = try await analysisService.analyze(
+                    image: cgImage
+                ) { [weak self] progress, count in
+                    self?.analysisProgress = progress
+                    self?.colonyCount = count
+                }
+
                 guard !Task.isCancelled else { return }
-
-                let progress = Double(step) / Double(steps)
-                analysisProgress = progress
-                colonyCount = Int(Double(targetCount) * progress)
-
-                try? await Task.sleep(for: .milliseconds(80))
+                colonyCount = result.totalColonies
+                analysisProgress = 1
+                analysisResult = AnalysisResult(
+                    totalColonies: result.totalColonies,
+                    averageConfidence: result.averageConfidence
+                )
+                appState = .complete
+            } catch is CancellationError {
+                return
+            } catch {
+                connectionError = error.localizedDescription
+                analysisProgress = 0
+                colonyCount = 0
+                appState = standbyState
             }
-
-            guard !Task.isCancelled else { return }
-
-            colonyCount = targetCount
-            analysisProgress = 1.0
-            analysisResult = AnalysisResult.sample
-            appState = .complete
         }
+    }
+
+    private var standbyState: AppState {
+        isDeviceConnected ? .connected : .disconnected
+    }
+
+    private static func cgImage(from image: NSImage) -> CGImage? {
+        var rect = NSRect(origin: .zero, size: image.size)
+        return image.cgImage(
+            forProposedRect: &rect,
+            context: nil,
+            hints: nil
+        )
     }
 
     func exportReport() {

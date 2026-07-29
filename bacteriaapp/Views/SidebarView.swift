@@ -93,25 +93,40 @@ struct SidebarView: View {
         } else {
             switch viewModel.appState {
             case .disconnected:
-                PrimaryButton(
-                    title: "Connect Camera",
-                    icon: "wifi",
-                    isLoading: viewModel.isConnecting,
-                    action: viewModel.connectDevice
-                )
+                VStack(spacing: 12) {
+                    photoUploadButton
+
+                    PrimaryButton(
+                        title: "Connect Camera",
+                        icon: "wifi",
+                        isLoading: viewModel.isConnecting,
+                        action: viewModel.connectDevice
+                    )
+                }
 
             case .connected:
-                PrimaryButton(
-                    title: "Capture Plate",
-                    icon: "camera.fill",
-                    isLoading: viewModel.isCapturing,
-                    action: viewModel.capturePlate
-                )
+                VStack(spacing: 12) {
+                    photoUploadButton
+
+                    PrimaryButton(
+                        title: "Capture Plate",
+                        icon: "camera.fill",
+                        isLoading: viewModel.isCapturing,
+                        action: viewModel.capturePlate
+                    )
+                }
 
             case .analyzing, .complete:
                 EmptyView()
             }
         }
+    }
+
+    private var photoUploadButton: some View {
+        PhotoUploadButton(
+            onPhotoSelected: { viewModel.uploadPhoto(from: $0) },
+            onError: viewModel.handlePhotoUploadError
+        )
     }
 }
 

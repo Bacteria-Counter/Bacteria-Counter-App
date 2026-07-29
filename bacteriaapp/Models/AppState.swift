@@ -18,14 +18,5 @@ struct CaptureSettings: Equatable {
 
 struct AnalysisResult: Equatable {
     let totalColonies: Int
-    let speciesCount: Int
     let averageConfidence: Int
-    let plateType: String
-
-    static let sample = AnalysisResult(
-        totalColonies: 29,
-        speciesCount: 4,
-        averageConfidence: 84,
-        plateType: "LB Agar 90mm"
-    )
 }
