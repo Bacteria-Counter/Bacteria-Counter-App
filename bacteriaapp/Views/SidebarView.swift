@@ -35,23 +35,13 @@ struct SidebarView: View {
                     }
                 }
                 
-                if viewModel.showColonyCount {
-                    VStack(spacing: 16) {
-                        ColonyCountPanel(
-                            count: viewModel.colonyCount,
-                            isAnalyzing: viewModel.appState == .analyzing,
-                            progress: viewModel.analysisProgress,
-                            isComplete: viewModel.appState == .complete
-                        )
-
-//                        if viewModel.appState == .complete {
-//                            SecondaryButton(
-//                                title: "Export Report",
-//                                icon: "square.and.arrow.down",
-//                                action: viewModel.exportReport
-//                            )
-//                        }
-                    }
+                if viewModel.showSegmentationStatus {
+                    SegmentationStatusPanel(
+                        isAnalyzing: viewModel.appState == .analyzing,
+                        progress: viewModel.analysisProgress,
+                        isComplete: viewModel.appState == .complete,
+                        maskCoverage: viewModel.segmentationCoverage
+                    )
                 }
 
             }

@@ -21,7 +21,7 @@ struct MainViewportView: View {
         if let image = viewModel.capturedImage {
             CapturedImageView(
                 image: image,
-                boxes: viewModel.colonyBoxes,
+                segmentationMask: viewModel.segmentationMask,
                 imageSize: viewModel.analysisImageSize
             )
         } else if viewModel.appState == .connected,

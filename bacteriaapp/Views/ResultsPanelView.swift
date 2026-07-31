@@ -5,22 +5,12 @@ struct ResultsPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ColonyCountPanel(
-                count: viewModel.colonyCount,
+            SegmentationStatusPanel(
                 isAnalyzing: viewModel.appState == .analyzing,
                 progress: viewModel.analysisProgress,
-                isComplete: viewModel.appState == .complete
+                isComplete: viewModel.appState == .complete,
+                maskCoverage: viewModel.segmentationCoverage
             )
-
-//            if viewModel.appState == .complete {
-//                SecondaryButton(
-//                    title: "Export Report",
-//                    icon: "square.and.arrow.down",
-//                    action: viewModel.exportReport
-//                )
-//                .padding(.horizontal, 20)
-//                .padding(.bottom, 24)
-//            }
         }
         .frame(width: AppTheme.resultsPanelWidth)
         .background(AppTheme.sidebarBackground)

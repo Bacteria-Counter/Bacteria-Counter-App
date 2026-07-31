@@ -15,6 +15,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Models/PetriDishSegmentation.conversion.json,
 			);
 			target = 6564F4103018456D00FD5F96 /* bacteriaapp */;
 		};
