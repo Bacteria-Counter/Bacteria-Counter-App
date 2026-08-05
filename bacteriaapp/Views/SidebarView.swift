@@ -58,23 +58,13 @@ struct SidebarView: View {
                     }
                 }
                 
-                if viewModel.showColonyCount {
-                    VStack(spacing: 16) {
-                        ColonyCountPanel(
-                            count: viewModel.colonyCount,
-                            isAnalyzing: viewModel.appState == .analyzing,
-                            progress: viewModel.analysisProgress,
-                            isComplete: viewModel.appState == .complete
-                        )
-
-//                        if viewModel.appState == .complete {
-//                            SecondaryButton(
-//                                title: "Export Report",
-//                                icon: "square.and.arrow.down",
-//                                action: viewModel.exportReport
-//                            )
-//                        }
-                    }
+                if viewModel.showSegmentationStatus {
+                    SegmentationStatusPanel(
+                        isAnalyzing: viewModel.appState == .analyzing,
+                        progress: viewModel.analysisProgress,
+                        isComplete: viewModel.appState == .complete,
+                        maskCoverage: viewModel.segmentationCoverage
+                    )
                 }
 
             }
@@ -117,6 +107,11 @@ struct SidebarView: View {
             VStack(spacing: 8) {
                 switch viewModel.appState {
                 case .disconnected:
+            switch viewModel.appState {
+            case .disconnected:
+                VStack(spacing: 12) {
+                    photoUploadButton
+
                     PrimaryButton(
                         title: "Connect Camera",
                         icon: "wifi",
@@ -125,6 +120,12 @@ struct SidebarView: View {
                     )
 
                 case .connected:
+                }
+
+            case .connected:
+                VStack(spacing: 12) {
+                    photoUploadButton
+
                     PrimaryButton(
                         title: "Capture Plate",
                         icon: "camera.fill",
@@ -145,6 +146,13 @@ struct SidebarView: View {
                 }
             }
         }
+    }
+
+    private var photoUploadButton: some View {
+        PhotoUploadButton(
+            onPhotoSelected: { viewModel.uploadPhoto(from: $0) },
+            onError: viewModel.handlePhotoUploadError
+        )
     }
 }
 
