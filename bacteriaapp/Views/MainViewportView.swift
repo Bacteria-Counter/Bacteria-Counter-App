@@ -19,7 +19,11 @@ struct MainViewportView: View {
     @ViewBuilder
     private var cameraContent: some View {
         if let image = viewModel.capturedImage {
-            CapturedImageView(image: image)
+            CapturedImageView(
+                image: image,
+                segmentationMask: viewModel.segmentationMask,
+                imageSize: viewModel.analysisImageSize
+            )
         } else if viewModel.appState == .connected,
                   let session = viewModel.cameraService.previewSession {
             CameraPreviewView(session: session)

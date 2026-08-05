@@ -35,23 +35,13 @@ struct SidebarView: View {
                     }
                 }
                 
-                if viewModel.showColonyCount {
-                    VStack(spacing: 16) {
-                        ColonyCountPanel(
-                            count: viewModel.colonyCount,
-                            isAnalyzing: viewModel.appState == .analyzing,
-                            progress: viewModel.analysisProgress,
-                            isComplete: viewModel.appState == .complete
-                        )
-
-//                        if viewModel.appState == .complete {
-//                            SecondaryButton(
-//                                title: "Export Report",
-//                                icon: "square.and.arrow.down",
-//                                action: viewModel.exportReport
-//                            )
-//                        }
-                    }
+                if viewModel.showSegmentationStatus {
+                    SegmentationStatusPanel(
+                        isAnalyzing: viewModel.appState == .analyzing,
+                        progress: viewModel.analysisProgress,
+                        isComplete: viewModel.appState == .complete,
+                        maskCoverage: viewModel.segmentationCoverage
+                    )
                 }
 
             }
@@ -93,25 +83,40 @@ struct SidebarView: View {
         } else {
             switch viewModel.appState {
             case .disconnected:
-                PrimaryButton(
-                    title: "Connect Camera",
-                    icon: "wifi",
-                    isLoading: viewModel.isConnecting,
-                    action: viewModel.connectDevice
-                )
+                VStack(spacing: 12) {
+                    photoUploadButton
+
+                    PrimaryButton(
+                        title: "Connect Camera",
+                        icon: "wifi",
+                        isLoading: viewModel.isConnecting,
+                        action: viewModel.connectDevice
+                    )
+                }
 
             case .connected:
-                PrimaryButton(
-                    title: "Capture Plate",
-                    icon: "camera.fill",
-                    isLoading: viewModel.isCapturing,
-                    action: viewModel.capturePlate
-                )
+                VStack(spacing: 12) {
+                    photoUploadButton
+
+                    PrimaryButton(
+                        title: "Capture Plate",
+                        icon: "camera.fill",
+                        isLoading: viewModel.isCapturing,
+                        action: viewModel.capturePlate
+                    )
+                }
 
             case .analyzing, .complete:
                 EmptyView()
             }
         }
+    }
+
+    private var photoUploadButton: some View {
+        PhotoUploadButton(
+            onPhotoSelected: { viewModel.uploadPhoto(from: $0) },
+            onError: viewModel.handlePhotoUploadError
+        )
     }
 }
 
