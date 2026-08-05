@@ -215,12 +215,10 @@ final class CameraService: NSObject, ObservableObject {
         }
 
         let dimensions = output.maxPhotoDimensions
-        let resolution: String
-        if dimensions.width > 0, dimensions.height > 0 {
-            let sideLength = min(dimensions.width, dimensions.height)
-            resolution = "\(sideLength)×\(sideLength)"
+        let resolution = if dimensions.width > 0, dimensions.height > 0 {
+            "\(dimensions.width)×\(dimensions.height)"
         } else {
-            resolution = "-"
+            "-"
         }
 
         let flash = preferredFlashMode(for: device, output: output)
@@ -317,7 +315,6 @@ final class CameraService: NSObject, ObservableObject {
 // concurrently even though the compiler can't verify that on its own.
 nonisolated final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let completion: (Result<NSImage, Error>) -> Void
-    private static let imageContext = CIContext()
 
     init(completion: @escaping (Result<NSImage, Error>) -> Void) {
         self.completion = completion
@@ -360,61 +357,25 @@ nonisolated final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDel
     private var didComplete = false
 
     private static func makeImage(from photo: AVCapturePhoto) -> NSImage? {
-        if let data = photo.fileDataRepresentation(),
-           let image = CIImage(
-               data: data,
-               options: [.applyOrientationProperty: true]
-           ),
-           let squareImage = squareImage(from: image) {
-            return squareImage
+        if let data = photo.fileDataRepresentation(), let image = NSImage(data: data) {
+            return image
         }
 
-        if let cgImage = photo.cgImageRepresentation(),
-           let squareCGImage = squareCGImage(from: cgImage) {
-            return makeNSImage(from: squareCGImage)
+        if let cgImage = photo.cgImageRepresentation() {
+            return NSImage(
+                cgImage: cgImage,
+                size: NSSize(width: cgImage.width, height: cgImage.height)
+            )
         }
 
         if let pixelBuffer = photo.pixelBuffer {
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-            return squareImage(from: ciImage)
+            let rep = NSCIImageRep(ciImage: ciImage)
+            let image = NSImage(size: rep.size)
+            image.addRepresentation(rep)
+            return image
         }
 
         return nil
-    }
-
-    private static func squareImage(from image: CIImage) -> NSImage? {
-        let extent = image.extent
-        guard extent.width > 0, extent.height > 0 else { return nil }
-
-        let sideLength = floor(min(extent.width, extent.height))
-        let cropRect = CGRect(
-            x: floor(extent.midX - sideLength * 0.5),
-            y: floor(extent.midY - sideLength * 0.5),
-            width: sideLength,
-            height: sideLength
-        )
-
-        guard let cgImage = imageContext.createCGImage(image, from: cropRect) else {
-            return nil
-        }
-        return makeNSImage(from: cgImage)
-    }
-
-    private static func squareCGImage(from image: CGImage) -> CGImage? {
-        let sideLength = min(image.width, image.height)
-        let cropRect = CGRect(
-            x: (image.width - sideLength) / 2,
-            y: (image.height - sideLength) / 2,
-            width: sideLength,
-            height: sideLength
-        )
-        return image.cropping(to: cropRect)
-    }
-
-    private static func makeNSImage(from image: CGImage) -> NSImage {
-        NSImage(
-            cgImage: image,
-            size: NSSize(width: image.width, height: image.height)
-        )
     }
 }

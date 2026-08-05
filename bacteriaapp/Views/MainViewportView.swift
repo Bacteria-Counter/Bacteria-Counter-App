@@ -34,11 +34,6 @@ struct MainViewportView: View {
                     }
                 )
             }
-            CapturedImageView(
-                image: image,
-                segmentationMask: viewModel.segmentationMask,
-                imageSize: viewModel.analysisImageSize
-            )
         } else if viewModel.appState == .connected,
                   let session = viewModel.cameraService.previewSession {
             CameraPreviewView(session: session)
