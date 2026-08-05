@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class MainViewModel: ObservableObject {
@@ -15,8 +16,10 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisResult: AnalysisResult?
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
+    @Published var selectedModel: ModelChoice = .yoloNew
 
     let cameraService = CameraService()
+    private let inferenceService = InferenceService()
 
     var showColonyCount: Bool {
         appState == .analyzing || appState == .complete
@@ -31,8 +34,8 @@ final class MainViewModel: ObservableObject {
         case .analyzing:
             return "Analyzing · \(Int(analysisProgress * 100))% · \(colonyCount) colonies detected"
         case .complete:
-            let result = analysisResult ?? .sample
-            return "Complete · \(result.totalColonies) colonies · \(result.speciesCount) species · avg conf \(result.averageConfidence)% · \(result.plateType)"
+            guard let result = analysisResult else { return "Complete" }
+            return "Complete · \(result.totalColonies) colonies · avg conf \(result.averageConfidence)% · \(result.modelUsed.fullDisplayName) model"
         }
     }
 
@@ -87,6 +90,19 @@ final class MainViewModel: ObservableObject {
         }
     }
 
+    /// Called by the sidebar model picker. Switching models after a plate
+    /// has already been analyzed re-runs analysis on the SAME image with the
+    /// new model — otherwise the displayed count/label would silently stay
+    /// from whichever model ran last, which reads as "the picker doesn't do
+    /// anything."
+    func selectModel(_ model: ModelChoice) {
+        guard selectedModel != model else { return }
+        selectedModel = model
+        if capturedImage != nil, appState != .analyzing {
+            startAnalysis()
+        }
+    }
+
     func newCapture() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -94,34 +110,68 @@ final class MainViewModel: ObservableObject {
         colonyCount = 0
         analysisProgress = 0
         analysisResult = nil
-        appState = .connected
+        appState = isDeviceConnected ? .connected : .disconnected
+    }
+
+    /// Lets the user analyze a plate photo from disk instead of the camera —
+    /// works regardless of whether a camera is connected.
+    func uploadImage() {
+        guard appState != .analyzing else { return }
+        connectionError = nil
+
+        let panel = NSOpenPanel()
+        panel.title = "Select a Plate Photo"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        guard let image = NSImage(contentsOf: url) else {
+            connectionError = "Could not load the selected image."
+            return
+        }
+
+        capturedImage = image
+        startAnalysis()
     }
 
     private func startAnalysis() {
+        guard let image = capturedImage else { return }
+
         appState = .analyzing
         colonyCount = 0
         analysisProgress = 0
 
-        let targetCount = AnalysisResult.sample.totalColonies
+        let model = selectedModel
 
         analysisTask = Task {
-            let steps = 40
-            for step in 0...steps {
-                guard !Task.isCancelled else { return }
-
-                let progress = Double(step) / Double(steps)
-                analysisProgress = progress
-                colonyCount = Int(Double(targetCount) * progress)
-
-                try? await Task.sleep(for: .milliseconds(80))
+            // Indeterminate progress while the request is in flight — the
+            // server doesn't stream partial progress, so this just gives
+            // visual feedback rather than tracking real completion percent.
+            let progressTask = Task {
+                while !Task.isCancelled && analysisProgress < 0.9 {
+                    analysisProgress += 0.03
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
             }
 
-            guard !Task.isCancelled else { return }
+            do {
+                let result = try await inferenceService.analyze(image: image, model: model)
+                progressTask.cancel()
+                guard !Task.isCancelled else { return }
 
-            colonyCount = targetCount
-            analysisProgress = 1.0
-            analysisResult = AnalysisResult.sample
-            appState = .complete
+                colonyCount = result.totalColonies
+                analysisProgress = 1.0
+                analysisResult = result
+                appState = .complete
+            } catch {
+                progressTask.cancel()
+                guard !Task.isCancelled else { return }
+                connectionError = error.localizedDescription
+                appState = isDeviceConnected ? .connected : .disconnected
+            }
         }
     }
 

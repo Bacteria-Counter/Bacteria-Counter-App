@@ -47,6 +47,11 @@ final class CameraService: NSObject, ObservableObject {
                 try await startSession(with: candidate.device, type: candidate.type)
                 return
             } catch {
+                // Without this, a failed iPhone/Continuity Camera attempt falls
+                // back to the Mac's built-in camera silently -- there was no way
+                // to tell afterward whether the iPhone was never detected or was
+                // detected but failed to start.
+                print("[CameraService] \(candidate.type) (\(candidate.device.localizedName)) failed to start: \(error)")
                 lastError = error
                 clearSession()
             }
@@ -173,8 +178,13 @@ final class CameraService: NSObject, ObservableObject {
             settings = AVCapturePhotoSettings()
         }
 
-        let dimensions = output.maxPhotoDimensions
-        if dimensions.width > 0, dimensions.height > 0 {
+        // Re-derive from the device's CURRENT active format rather than
+        // trusting output.maxPhotoDimensions -- the active format can
+        // change after the session starts (Continuity Camera renegotiates
+        // formats), and a stale value here crashes
+        // capturePhoto(with:delegate:) since it must match one of the
+        // *current* format's supportedMaxPhotoDimensions.
+        if let device, let dimensions = maximumPhotoDimensions(for: device.activeFormat) {
             settings.maxPhotoDimensions = dimensions
         }
 
@@ -295,7 +305,15 @@ final class CameraService: NSObject, ObservableObject {
     }
 }
 
-private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+// AVCapturePhotoOutput invokes these delegate methods on its own internal
+// queue (here, sessionQueue), never guaranteed to be the main actor -- this
+// project defaults every type to @MainActor isolation
+// (SWIFT_DEFAULT_ACTOR_ISOLATION), so this needs an explicit opt-out or
+// calling the delegate crashes under Swift 6's strict concurrency checking.
+// @unchecked Sendable: AVFoundation guarantees these delegate methods fire
+// serially for a single capture, so mutable `didComplete` is never touched
+// concurrently even though the compiler can't verify that on its own.
+nonisolated final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let completion: (Result<NSImage, Error>) -> Void
 
     init(completion: @escaping (Result<NSImage, Error>) -> Void) {
