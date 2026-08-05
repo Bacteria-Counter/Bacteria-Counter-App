@@ -64,6 +64,15 @@ final class CameraPreviewNSView: NSView {
 
 struct CapturedImageView: View {
     let image: NSImage
+    var detections: [ColonyDetection] = []
+    /// Pixel size of the image the server actually measured `detections`
+    /// against (from `AnalysisResult.imageWidth/imageHeight`) — used to scale
+    /// detection circles onto wherever this view ends up laying the image
+    /// out, independent of `NSImage`'s own reported size.
+    var detectionImageSize: CGSize?
+
+    var body: some View {
+        GeometryReader { geometry in
     let segmentationMask: CGImage?
     let imageSize: CGSize
 
@@ -78,6 +87,26 @@ struct CapturedImageView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+
+                if let sourceSize = detectionImageSize, sourceSize.width > 0, sourceSize.height > 0 {
+                    let scale = min(
+                        geometry.size.width / sourceSize.width,
+                        geometry.size.height / sourceSize.height
+                    )
+                    let offsetX = (geometry.size.width - sourceSize.width * scale) / 2
+                    let offsetY = (geometry.size.height - sourceSize.height * scale) / 2
+
+                    ForEach(Array(detections.enumerated()), id: \.offset) { _, detection in
+                        let diameter = detection.radius * 2 * scale
+                        Circle()
+                            .stroke(AppTheme.accentGreen, lineWidth: 2)
+                            .frame(width: diameter, height: diameter)
+                            .position(
+                                x: detection.cx * scale + offsetX,
+                                y: detection.cy * scale + offsetY
+                            )
+                    }
 
                 if let segmentationMask {
                     Color.black

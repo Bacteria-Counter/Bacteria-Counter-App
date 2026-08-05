@@ -1,0 +1,12 @@
+opencv-python>=4.9
+numpy>=1.24
+scikit-image>=0.22
+matplotlib>=3.8
+pandas>=2.0
+PyYAML>=6.0
+pytest>=8.0
+tqdm>=4.66
+ultralytics>=8.3
+scikit-learn>=1.4
+streamlit>=1.37
+torch>=2.2

@@ -1,0 +1,43 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Data and generated artifacts
+data/raw/*
+data/interim/*
+data/processed/*
+data/annotations/*
+outputs/*
+models/checkpoints/*
+models/exports/*
+
+# Keep folder structure visible
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/annotations/.gitkeep
+!outputs/.gitkeep
+!outputs/debug/
+!outputs/debug/.gitkeep
+!outputs/overlays/
+!outputs/overlays/.gitkeep
+!outputs/metrics/
+!outputs/metrics/.gitkeep
+!models/.gitkeep
+!models/checkpoints/.gitkeep
+!models/exports/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+subject/
+AGENTS.md
+handwritten_notes.md
+docs/
+report.md

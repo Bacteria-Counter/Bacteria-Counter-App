@@ -14,6 +14,29 @@ struct SidebarView: View {
                     )
                 }
 
+                SidebarSection(title: "MODEL") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Picker("Model", selection: Binding(
+                            get: { viewModel.selectedModel },
+                            set: { viewModel.selectModel($0) }
+                        )) {
+                            ForEach(ModelChoice.allCases) { choice in
+                                Text(choice.fullDisplayName).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .disabled(viewModel.appState == .analyzing)
+
+                        if let caveat = viewModel.selectedModel.caveat {
+                            Text(caveat)
+                                .font(AppTheme.monoSmall)
+                                .foregroundStyle(AppTheme.accentOrange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
                 SidebarSection(title: "CAPTURE") {
                     VStack(spacing: 8) {
                         InfoRow(label: "Resolution", value: viewModel.captureSettings.resolution)
@@ -81,6 +104,9 @@ struct SidebarView: View {
                 action: viewModel.newCapture
             )
         } else {
+            VStack(spacing: 8) {
+                switch viewModel.appState {
+                case .disconnected:
             switch viewModel.appState {
             case .disconnected:
                 VStack(spacing: 12) {
@@ -92,6 +118,8 @@ struct SidebarView: View {
                         isLoading: viewModel.isConnecting,
                         action: viewModel.connectDevice
                     )
+
+                case .connected:
                 }
 
             case .connected:
@@ -104,10 +132,18 @@ struct SidebarView: View {
                         isLoading: viewModel.isCapturing,
                         action: viewModel.capturePlate
                     )
+
+                case .analyzing, .complete:
+                    EmptyView()
                 }
 
-            case .analyzing, .complete:
-                EmptyView()
+                if viewModel.appState == .disconnected || viewModel.appState == .connected {
+                    SecondaryButton(
+                        title: "Upload Image",
+                        icon: "square.and.arrow.up",
+                        action: viewModel.uploadImage
+                    )
+                }
             }
         }
     }

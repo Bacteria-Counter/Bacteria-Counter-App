@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class MainViewModel: ObservableObject {
@@ -16,8 +17,10 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisProgress: Double = 0
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
+    @Published var selectedModel: ModelChoice = .yoloNew
 
     let cameraService = CameraService()
+    private let inferenceService = InferenceService()
 
     var showSegmentationStatus: Bool {
         appState == .analyzing || appState == .complete
@@ -32,7 +35,8 @@ final class MainViewModel: ObservableObject {
         case .analyzing:
             return "Segmenting petri dish · \(Int(analysisProgress * 100))%"
         case .complete:
-            return "Petri dish segmentation complete"
+            guard let result = analysisResult else { return "Complete" }
+            return "Complete · \(result.totalColonies) colonies · avg conf \(result.averageConfidence)% · \(result.modelUsed.fullDisplayName) model"
         }
     }
 
@@ -88,29 +92,17 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    func uploadPhoto(from url: URL) {
-        guard appState == .disconnected || appState == .connected else { return }
-
-        connectionError = nil
-
-        let hasSecurityScopedAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if hasSecurityScopedAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
+    /// Called by the sidebar model picker. Switching models after a plate
+    /// has already been analyzed re-runs analysis on the SAME image with the
+    /// new model — otherwise the displayed count/label would silently stay
+    /// from whichever model ran last, which reads as "the picker doesn't do
+    /// anything."
+    func selectModel(_ model: ModelChoice) {
+        guard selectedModel != model else { return }
+        selectedModel = model
+        if capturedImage != nil, appState != .analyzing {
+            startAnalysis()
         }
-
-        guard let image = NSImage(contentsOf: url) else {
-            connectionError = "The selected file could not be opened as an image."
-            return
-        }
-
-        capturedImage = image
-        startAnalysis()
-    }
-
-    func handlePhotoUploadError(_ error: Error) {
-        connectionError = "Could not upload photo: \(error.localizedDescription)"
     }
 
     func newCapture() {
@@ -121,46 +113,72 @@ final class MainViewModel: ObservableObject {
         segmentationCoverage = nil
         analysisImageSize = .zero
         analysisProgress = 0
-        appState = standbyState
+        analysisResult = nil
+        appState = isDeviceConnected ? .connected : .disconnected
     }
 
-    private func startAnalysis() {
-        guard let capturedImage,
-              let cgImage = Self.cgImage(from: capturedImage) else {
-            connectionError = DishSegmentationError.imageConversionFailed.localizedDescription
+    /// Lets the user analyze a plate photo from disk instead of the camera —
+    /// works regardless of whether a camera is connected.
+    func uploadImage() {
+        guard appState != .analyzing else { return }
+        connectionError = nil
+
+        let panel = NSOpenPanel()
+        panel.title = "Select a Plate Photo"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        guard let image = NSImage(contentsOf: url) else {
+            connectionError = "Could not load the selected image."
             return
         }
 
+        capturedImage = image
+        startAnalysis()
+    }
+
+    private func startAnalysis() {
+        guard let image = capturedImage else { return }
+
         appState = .analyzing
-        segmentationMask = nil
-        segmentationCoverage = nil
-        analysisImageSize = CGSize(
-            width: cgImage.width,
-            height: cgImage.height
-        )
-        analysisProgress = 0.1
+        colonyCount = 0
+        analysisProgress = 0
 
-        segmentationTask = Task {
-            do {
-                let result = try await segmenter.makeMask(from: cgImage)
+        let model = selectedModel
 
-                guard !Task.isCancelled else { return }
-                segmentationMask = result.mask
-                segmentationCoverage = result.foregroundFraction
-                analysisProgress = 1
-                appState = .complete
-            } catch is CancellationError {
-                return
-            } catch {
-                connectionError = error.localizedDescription
-                analysisProgress = 0
-                segmentationMask = nil
-                segmentationCoverage = nil
-                appState = standbyState
+        analysisTask = Task {
+            // Indeterminate progress while the request is in flight — the
+            // server doesn't stream partial progress, so this just gives
+            // visual feedback rather than tracking real completion percent.
+            let progressTask = Task {
+                while !Task.isCancelled && analysisProgress < 0.9 {
+                    analysisProgress += 0.03
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
             }
         }
     }
 
+            do {
+                let result = try await inferenceService.analyze(image: image, model: model)
+                progressTask.cancel()
+                guard !Task.isCancelled else { return }
+
+                colonyCount = result.totalColonies
+                analysisProgress = 1.0
+                analysisResult = result
+                appState = .complete
+            } catch {
+                progressTask.cancel()
+                guard !Task.isCancelled else { return }
+                connectionError = error.localizedDescription
+                appState = isDeviceConnected ? .connected : .disconnected
+            }
+        }
     private var standbyState: AppState {
         isDeviceConnected ? .connected : .disconnected
     }
