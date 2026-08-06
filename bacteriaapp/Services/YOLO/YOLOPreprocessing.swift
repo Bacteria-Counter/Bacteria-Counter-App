@@ -5,23 +5,6 @@
 //  Created by Regina Celine Adiwinata on 05/08/26.
 //
 
-//
-//  CLAHEGrayscalePreprocessor.swift
-//
-//  Swift/Accelerate (vImage) port of the Python CLAHEGrayscalePreprocessor
-//  (grayscale -> CLAHE -> replicated to 3-channel "BGR-like" RGB output).
-//
-//  IMPORTANT CAVEAT:
-//  vImageCLAHE_Planar8 (Apple/Accelerate) is NOT a numerically identical
-//  implementation of cv2.createCLAHE (OpenCV). The clipLimit scale/semantics
-//  differ between the two libraries. If your model was trained on images
-//  preprocessed with OpenCV's CLAHE, output from this Swift version will be
-//  visually similar but not pixel-identical. Validate on a sample set before
-//  relying on this for production inference parity.
-//
-//  Requires: import Accelerate, CoreGraphics, ImageIO, UniformTypeIdentifiers
-//
-
 import Accelerate
 import CoreGraphics
 import Foundation
@@ -30,7 +13,7 @@ import UniformTypeIdentifiers
 
 final class CLAHEGrayscalePreprocessor {
 
-    // MARK: - Config (mirrors Python __init__)
+    // MARK: - Config
 
     let clipLimit: Float
     let tileGridWidth: Int
@@ -55,11 +38,8 @@ final class CLAHEGrayscalePreprocessor {
         case cgImageCreationFailed
     }
 
-    // MARK: - Core preprocessing (mirrors Python `preprocess`)
+    // MARK: - Core preprocessing
 
-    /// Apply grayscale + CLAHE to a CGImage, then convert back to a 3-channel
-    /// image (gray value replicated into R/G/B), analogous to
-    /// cv2.cvtColor(clahe_result, cv2.COLOR_GRAY2BGR).
     func preprocess(_ cgImage: CGImage) throws -> CGImage {
         var grayBuffer = try makeGrayscaleBuffer(from: cgImage)
         defer { grayBuffer.free() }
@@ -69,7 +49,6 @@ final class CLAHEGrayscalePreprocessor {
         return try grayscaleBufferToRGBCGImage(grayBuffer)
     }
 
-    /// Convenience operator-style call, mirrors Python __call__.
     func callAsFunction(_ cgImage: CGImage) throws -> CGImage {
         try preprocess(cgImage)
     }
@@ -77,13 +56,16 @@ final class CLAHEGrayscalePreprocessor {
     // MARK: - Grayscale conversion
 
     private func makeGrayscaleBuffer(from cgImage: CGImage) throws -> vImage_Buffer {
-        var format = vImage_CGImageFormat(
+        // PERBAIKAN 1: Menggunakan 'guard var' untuk meng-unwrap Optional format
+        guard var format = vImage_CGImageFormat(
             bitsPerComponent: 8,
             bitsPerPixel: 32,
             colorSpace: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue),
             renderingIntent: .defaultIntent
-        )
+        ) else {
+            throw PreprocessError.cgImageCreationFailed
+        }
 
         var argbBuffer = vImage_Buffer()
         var err = vImageBuffer_InitWithCGImage(
@@ -98,15 +80,12 @@ final class CLAHEGrayscalePreprocessor {
         )
         guard err == kvImageNoError else { throw PreprocessError.vImageError(err) }
 
-        // BT.601 luma weights, matching OpenCV's default cv2.COLOR_BGR2GRAY
-        // (Y = 0.299 R + 0.587 G + 0.114 B). Source buffer here is ARGB8888
-        // (channel order A, R, G, B in the coefficient matrix below).
         let divisor: Int32 = 0x1000
         var coefficientsMatrix: [Int16] = [
-            0,                                   // A (ignored)
-            Int16(0.299 * Float(divisor)),        // R
-            Int16(0.587 * Float(divisor)),        // G
-            Int16(0.114 * Float(divisor)),        // B
+            0,                                   // A
+            Int16(0.299 * Float(divisor)),       // R
+            Int16(0.587 * Float(divisor)),       // G
+            Int16(0.114 * Float(divisor)),       // B
         ]
 
         err = vImageMatrixMultiply_ARGB8888ToPlanar8(
@@ -123,24 +102,20 @@ final class CLAHEGrayscalePreprocessor {
         return grayBuffer
     }
 
-    // MARK: - CLAHE
+    // MARK: - CLAHE (Fallback to Equalization)
 
     private func applyCLAHE(to buffer: inout vImage_Buffer) throws {
-        // NOTE: clipLimit scale differs from OpenCV's — tune empirically if
-        // you need visual parity with the Python pipeline.
-        let err = vImageCLAHE_Planar8(
+        // PERBAIKAN 2: Apple tidak memiliki CLAHE.
+        // Sebagai gantinya, kita gunakan Histogram Equalization standar.
+        let err = vImageEqualization_Planar8(
             &buffer,
             &buffer,
-            nil,
-            vImagePixelCount(tileGridWidth),
-            vImagePixelCount(tileGridHeight),
-            UInt32(max(clipLimit, 1)),
             vImage_Flags(kvImageNoFlags)
         )
         guard err == kvImageNoError else { throw PreprocessError.vImageError(err) }
     }
 
-    // MARK: - Back to 3-channel image (mirrors cv2.COLOR_GRAY2BGR)
+    // MARK: - Back to 3-channel image
 
     private func grayscaleBufferToRGBCGImage(_ grayBuffer: vImage_Buffer) throws -> CGImage {
         var alphaBuffer = vImage_Buffer()
@@ -158,23 +133,25 @@ final class CLAHEGrayscalePreprocessor {
         guard err == kvImageNoError else { throw PreprocessError.vImageError(err) }
         defer { argbBuffer.free() }
 
-        // Replicate the same grayscale plane into R, G, and B.
         var r = grayBuffer
         var g = grayBuffer
         var b = grayBuffer
 
-        err = vImageConvert_Planar8ToARGB8888(
+        err = vImageConvert_Planar8toARGB8888(
             &alphaBuffer, &r, &g, &b, &argbBuffer, vImage_Flags(kvImageNoFlags)
         )
         guard err == kvImageNoError else { throw PreprocessError.vImageError(err) }
 
-        var format = vImage_CGImageFormat(
+        // PERBAIKAN 1: Unwrap Optional format lagi di sini
+        guard var format = vImage_CGImageFormat(
             bitsPerComponent: 8,
             bitsPerPixel: 32,
             colorSpace: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue),
             renderingIntent: .defaultIntent
-        )
+        ) else {
+            throw PreprocessError.cgImageCreationFailed
+        }
 
         var creationError = vImage_Error()
         guard
@@ -188,7 +165,7 @@ final class CLAHEGrayscalePreprocessor {
         return cgImage
     }
 
-    // MARK: - File operations (mirrors process_file / process_directory)
+    // MARK: - File operations
 
     @discardableResult
     func processFile(inputPath: URL, outputPath: URL? = nil) throws -> CGImage {

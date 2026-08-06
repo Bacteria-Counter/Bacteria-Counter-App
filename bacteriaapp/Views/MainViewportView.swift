@@ -18,9 +18,14 @@ struct MainViewportView: View {
 
     @ViewBuilder
     private var cameraContent: some View {
-        if let image = viewModel.capturedImage {
+        if let croppedImage = viewModel.croppedDishImage, viewModel.appState == .complete {
+            DetectionResultView(
+                croppedImage: croppedImage,
+                detections: viewModel.detections
+            )
+        } else if let capturedImage = viewModel.capturedImage {
             CapturedImageView(
-                image: image,
+                image: capturedImage,
                 segmentationMask: viewModel.segmentationMask,
                 imageSize: viewModel.analysisImageSize
             )

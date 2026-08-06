@@ -13,6 +13,34 @@ struct SidebarView: View {
                         isConnected: viewModel.isDeviceConnected
                     )
                 }
+                
+                SidebarSection(title: "AI MODEL") {
+                    Menu {
+                            ForEach(AIModelType.allCases) { model in
+                                Button(action: {
+                                    viewModel.selectedModel = model
+                                }) {
+                                    if viewModel.selectedModel == model {
+                                        Label(model.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(model.rawValue)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(viewModel.selectedModel.rawValue)
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.controlBackgroundColor))
+                            .cornerRadius(6)
+                        }
+                }
 
                 SidebarSection(title: "CAPTURE") {
                     VStack(spacing: 8) {
@@ -43,6 +71,8 @@ struct SidebarView: View {
                         maskCoverage: viewModel.segmentationCoverage
                     )
                 }
+                
+                DetectionCountView(count: viewModel.detections.count)
 
             }
             .padding(.horizontal, 20)
