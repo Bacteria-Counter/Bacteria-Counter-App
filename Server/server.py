@@ -75,6 +75,14 @@ and 32.22 vs 8.72) — deliberately not exposed here.
     with no overlay circles for it. Training may resume later; this
     checkpoint is a snapshot, not a final answer.
 
+All YOLO variants (yolo_old/yolo_new/dog_blend/clahe/lab_ab) use an adaptive
+inference imgsz (see adaptive_imgsz()) instead of a fixed 1536 -- it's
+computed per-photo from the detected dish radius so small/faint colonies in
+photos where the dish is framed smaller (e.g. a phone shot further back)
+don't get shrunk past the point of detection by a one-size-fits-all resize.
+Verified against the AGAR ground truth + real lab photos: no accuracy
+regression, meaningfully better detection on real phone photos.
+
 Run with:  .venv/bin/python server.py
 """
 import base64
@@ -85,17 +93,26 @@ import sys
 import tempfile
 from pathlib import Path
 
+from typing import Optional
+
 import cv2
 import numpy as np
 import torch
 import torchvision.transforms as T
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from ultralytics import FastSAM, YOLO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fastsam_colony_count import count_colonies_fastsam
+from fastsam_colony_count import count_colonies_fastsam, find_dish_circle
 from csrnet_model import CSRNet
+from cfu_calculator import (
+    DEFAULT_DISH_AREA_CM2,
+    PlateReading,
+    assess_plate_countability,
+    calculate_cfu,
+)
 
 app = FastAPI(title="Bacteria Counter Inference Server")
 
@@ -107,7 +124,35 @@ YOLO_MODEL_PATHS = {
     "lab_ab": "lab_ab_best.pt",
 }
 YOLO_CONF = 0.4
-YOLO_IMGSZ = 1536
+YOLO_IMGSZ = 1536  # fallback only -- used when the dish can't be detected
+
+# The AGAR training photos show the dish radius at ~581px once YOLO's own
+# letterbox resize has been applied at imgsz=1536 (measured: dish radius
+# ~1510px on ~3990px-long-side training photos, 1510 * 1536/3990 ~= 581).
+# Real phone photos often frame the dish much smaller in the raw frame (e.g.
+# ~945px radius on a 4160px-tall photo), so resizing them to the same fixed
+# 1536 shrinks small/faint colonies past the point the model can see them.
+# Instead, pick imgsz per-photo so the dish (and therefore each colony)
+# lands at roughly that same ~581px reference scale the model was trained
+# on, regardless of how the photo was framed or what resolution it came in
+# at. Verified against the 18-image AGAR ground truth + real lab photos:
+# zero regression on AGAR/empty-background safety, meaningfully more
+# detections on real phone photos with small/distant colonies.
+DISH_RADIUS_REFERENCE_PX = 581
+ADAPTIVE_IMGSZ_MIN = 1280
+ADAPTIVE_IMGSZ_MAX = 3200
+
+
+def adaptive_imgsz(img_bgr: np.ndarray) -> int:
+    h, w = img_bgr.shape[:2]
+    dish = find_dish_circle(img_bgr)
+    if dish is None:
+        return YOLO_IMGSZ
+    _, _, dish_radius = dish
+    long_side = max(h, w)
+    required = DISH_RADIUS_REFERENCE_PX * long_side / dish_radius
+    required = int(round(required / 32) * 32)  # YOLO requires multiples of 32
+    return max(ADAPTIVE_IMGSZ_MIN, min(ADAPTIVE_IMGSZ_MAX, required))
 
 SAM_IMGSZ = 3840
 SAM_MIN_AREA_FRAC = 0.000005
@@ -170,9 +215,10 @@ YOLO_PREPROCESS = {
 def run_yolo(image_path: str, model_key: str) -> dict:
     img = cv2.imread(image_path)
     h, w = img.shape[:2]
+    imgsz = adaptive_imgsz(img)
     preprocess = YOLO_PREPROCESS[model_key]
     source = preprocess(img) if preprocess is not None else image_path
-    res = yolo_models[model_key].predict(source=source, imgsz=YOLO_IMGSZ, conf=YOLO_CONF,
+    res = yolo_models[model_key].predict(source=source, imgsz=imgsz, conf=YOLO_CONF,
                                           max_det=1000, device="cpu", verbose=False)[0]
     boxes = res.boxes
     count = 0 if boxes is None else len(boxes)
@@ -285,6 +331,59 @@ def health():
     return {"status": "ok"}
 
 
+class PlateInput(BaseModel):
+    """One petri dish in a CFU calculation. `dilution` is the fraction (0.01
+    for a 1:100 dilution). `status` is "ok", "spreading", "lab_accident" or
+    "tntc" -- the latter three are the microbiologist's judgement call at
+    counting time, not something the detector can decide."""
+    dilution: float
+    count: Optional[int] = None
+    status: str = "ok"
+    spreadFraction: Optional[float] = None
+
+
+class CFURequest(BaseModel):
+    plates: list[PlateInput]
+    dishAreaCm2: float = DEFAULT_DISH_AREA_CM2
+    method: str = "pour"          # "pour" (1 mL) or "spread" (0.1 mL)
+    unit: str = "CFU/ml"          # or "CFU/g"
+
+
+@app.post("/calculate-cfu")
+def calculate_cfu_endpoint(request: CFURequest):
+    """Turn per-plate colony counts into a reportable CFU figure using the
+    APHA 2002 rules (see cfu_calculator.py). This is separate from /analyze:
+    /analyze counts one photo, this combines several counted plates across
+    dilutions into the number the lab actually reports."""
+    try:
+        readings = [
+            PlateReading(
+                dilution=p.dilution,
+                count=p.count,
+                status=p.status,
+                spread_fraction=p.spreadFraction,
+            )
+            for p in request.plates
+        ]
+        result = calculate_cfu(
+            readings,
+            dish_area_cm2=request.dishAreaCm2,
+            method=request.method,
+            unit=request.unit,
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+    return {
+        "value": result.value,
+        "display": result.display,
+        "regulations": result.regulations,
+        "estimated": result.estimated,
+        "bounded": result.bounded,
+        "detail": result.detail,
+    }
+
+
 VALID_MODELS = ("yolo_old", "yolo_new", "sam", "dog_blend", "clahe", "lab_ab", "gsam2", "csrnet")
 
 
@@ -309,6 +408,11 @@ async def analyze(image: UploadFile = File(...), model: str = Form(...)):
     except Exception as exc:  # surface a readable error to the app instead of a bare 500
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
+    # APHA 2002 reliability labelling -- the count itself is untouched, this
+    # just says how far it can be trusted (25-250 countable, below/above that
+    # is estimate-only, past ~100 colonies/cm^2 it isn't estimable at all).
+    countability = assess_plate_countability(result["count"])
+
     return {
         "totalColonies": result["count"],
         "averageConfidence": result["confidence"],
@@ -316,6 +420,7 @@ async def analyze(image: UploadFile = File(...), model: str = Form(...)):
         "detections": result["detections"],
         "imageWidth": result["imageWidth"],
         "imageHeight": result["imageHeight"],
+        "countability": countability,
         "heatmapImage": result.get("heatmapImage"),
     }
 

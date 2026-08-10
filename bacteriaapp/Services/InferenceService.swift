@@ -31,6 +31,14 @@ struct InferenceService {
         let radius: Double
     }
 
+    private struct CountabilityDTO: Decodable {
+        let status: String
+        let regulation: Int
+        let reliable: Bool
+        let densityPerCm2: Double
+        let advisory: String
+    }
+
     private struct AnalyzeResponse: Decodable {
         let totalColonies: Int
         let averageConfidence: Double
@@ -43,6 +51,9 @@ struct InferenceService {
         /// original photo, base64-encoded JPEG, in place of box/circle
         /// overlays.
         let heatmapImage: String?
+        /// APHA 2002 reliability labelling of the count (25-250 countable,
+        /// outside that estimate-only). Optional so older servers still work.
+        let countability: CountabilityDTO?
     }
 
     private struct ServerErrorBody: Decodable {
@@ -97,6 +108,11 @@ struct InferenceService {
             detections: decoded.detections.map { ColonyDetection(cx: $0.cx, cy: $0.cy, radius: $0.radius) },
             imageWidth: decoded.imageWidth,
             imageHeight: decoded.imageHeight,
+            countability: decoded.countability.map {
+                Countability(status: $0.status, regulation: $0.regulation,
+                             reliable: $0.reliable, densityPerCm2: $0.densityPerCm2,
+                             advisory: $0.advisory)
+            },
             heatmapImage: heatmapImage
         )
     }

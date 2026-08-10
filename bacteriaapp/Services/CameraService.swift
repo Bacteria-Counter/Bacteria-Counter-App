@@ -142,6 +142,16 @@ final class CameraService: NSObject, ObservableObject {
     func capturePhoto() async throws -> NSImage {
         guard let photoOutput else { throw CameraError.notConnected }
 
+        // photoOutput.maxPhotoDimensions was only set once, at session-start
+        // time, from whatever format was active then. Continuity Camera can
+        // renegotiate to a higher-resolution format afterward, so the
+        // settings computed below (from the device's CURRENT active format)
+        // can end up larger than this stale ceiling -- refresh it here too,
+        // right before every capture, so output and settings always agree.
+        if let currentDevice, let dimensions = Self.maximumPhotoDimensions(for: currentDevice.activeFormat) {
+            photoOutput.maxPhotoDimensions = dimensions
+        }
+
         return try await withCheckedThrowingContinuation { continuation in
             let delegate = PhotoCaptureDelegate { [weak self] result in
                 Task { @MainActor in

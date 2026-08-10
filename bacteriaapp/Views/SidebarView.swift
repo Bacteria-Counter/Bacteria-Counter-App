@@ -37,6 +37,20 @@ struct SidebarView: View {
                     }
                 }
 
+                // APHA 2002 says a plate is only directly reportable at
+                // 25-250 colonies; outside that the number is an estimate.
+                // Only shown when the count actually falls outside, so it
+                // stays quiet on a normal plate.
+                if let warning = viewModel.countabilityWarning {
+                    SidebarSection(title: "APHA 2002") {
+                        Text(warning)
+                            .font(AppTheme.monoSmall)
+                            .foregroundStyle(AppTheme.accentOrange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 SidebarSection(title: "CAPTURE") {
                     VStack(spacing: 8) {
                         InfoRow(label: "Resolution", value: viewModel.captureSettings.resolution)

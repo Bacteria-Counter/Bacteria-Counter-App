@@ -43,6 +43,72 @@ numbers and caveats for each. Briefly:
 All 8 are kept in the app deliberately so real-world photos — not just
 ground-truth benchmarks — can be the tiebreaker on which is most robust.
 
+## APHA 2002 counting rules
+
+From *Panduan Perhitungan Koloni Mikroorganisme Rev 2*. Two parts are
+implemented, both in `cfu_calculator.py`.
+
+### 1. Count reliability (applied automatically on every `/analyze`)
+
+APHA only treats 25–250 colonies on a plate as directly reportable
+(regulation 1). Below that (regulation 5) or above it (regulation 4) the
+number is estimate-only, and past ~100 colonies/cm² (regulation 7) it isn't
+estimable at all. `/analyze` now returns a `countability` block saying which
+applies — **the count itself is never modified**, this only labels how far
+it can be trusted:
+
+```json
+"countability": {
+  "status": "above_range", "regulation": 4, "reliable": false,
+  "densityPerCm2": 7.0,
+  "advisory": "Di atas 250 koloni - hanya boleh dilaporkan sebagai estimasi..."
+}
+```
+
+The app surfaces this in the sidebar, but only when the count falls outside
+the reportable range, so it stays quiet on a normal plate.
+
+**On regulation 8 (chain formation):** the rule says a chain of colonies
+grown from one clump counts as a single colony. Merging detections whose
+*bounding boxes* overlap was tested as a way to implement this and is
+clearly wrong — on the AGAR ground truth it took total error from 4 to 138
+(e.g. sample 842: truth 106, raw detection 106, merged 43), because YOLO's
+boxes are larger than the colonies and overlap between colonies that are
+plainly separate. Doing this properly needs pixel-level adjacency from
+segmentation masks plus a shape test for a genuine chain, which boxes can't
+provide. Not implemented rather than implemented wrongly.
+
+### 2. CFU/mL reporting (optional, separate endpoint)
+
+Regulations 1–8 for combining plates across dilutions — duplicate
+averaging, the 2× ratio rule, TNTC, spreaders and lab accidents — exposed as
+`POST /calculate-cfu`:
+
+```bash
+curl -X POST http://127.0.0.1:8721/calculate-cfu \
+  -H "Content-Type: application/json" \
+  -d '{"plates":[{"dilution":0.01,"count":243},{"dilution":0.001,"count":34}]}'
+# -> {"display":"2.9 x 10^4 CFU/ml","regulations":[3], ...}
+```
+
+Each plate takes `dilution` (0.01 = 1:100), `count`, and a `status` of
+`ok` / `spreading` / `lab_accident` / `tntc` — the last three are the
+microbiologist's judgement at counting time, not something the detector
+decides. Optional: `dishAreaCm2` (default 56, a 15×100 mm dish),
+`method` (`pour` for a 1 mL inoculum, `spread` for 0.1 mL — which multiplies
+the result by 10 per the document's notes), and `unit` (`CFU/ml` or `CFU/g`).
+
+Verified against all 23 worked examples in the source document:
+
+```bash
+.venv/bin/python3 test_cfu_calculator.py    # 21/23
+```
+
+The two that differ (samples 1116 and 1118) are cases where the document
+skips showing its intermediate arithmetic and appears to have rounded
+inconsistently with its own stated examples — see the module docstring in
+`cfu_calculator.py`. Flagged rather than fudged.
+
 ### Setting up `gsam2` (optional, extra steps)
 
 7 of the 8 models load in-process and work out of the box once `Setup` above
