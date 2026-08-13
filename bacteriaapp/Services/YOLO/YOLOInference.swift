@@ -141,23 +141,27 @@ actor YOLODetector {
                     bestScore = score
                 }
             }
-            // Model sudah filter pakai confidenceThreshold, ini jaga-jaga saja.
             guard bestScore > 0 else { continue }
 
+            // x, y adalah CENTER point (bukan top-left), width/height juga
+            // dalam skala relatif (0...1), origin top-left/y-down (standar image,
+            // bukan Vision-style bottom-left).
             let x = coordPointer[box * coordRowStride + 0 * coordColStride]
             let y = coordPointer[box * coordRowStride + 1 * coordColStride]
             let width = coordPointer[box * coordRowStride + 2 * coordColStride]
             let height = coordPointer[box * coordRowStride + 3 * coordColStride]
 
+            // Konversi: center → top-left (top-down), lalu flip ke Vision-style
+            // (bottom-left origin) supaya konsisten dengan BoundingBox.rect(in:).
             results.append(
                 BoundingBox(
                     normalizedRect: CGRect(
-                        x: CGFloat(x),
-                        y: CGFloat(1 - y - height),
+                        x: CGFloat(x - width / 2),
+                        y: CGFloat(1 - y - height / 2),
                         width: CGFloat(width),
                         height: CGFloat(height)
                     ),
-                    label: "bakteri",
+                    label: "bacteria",
                     confidence: bestScore
                 )
             )

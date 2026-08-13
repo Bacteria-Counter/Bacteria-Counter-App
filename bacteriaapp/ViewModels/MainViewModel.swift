@@ -21,8 +21,10 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var croppedDishImage: CGImage?
     @Published private(set) var detections: [BoundingBox] = []
     
+    private let clahePreprocessor = CLAHEGrayscalePreprocessor()
+    @Published private(set) var preprocessedDishImage: CGImage?
     private let yoloDetector = YOLODetector()
-
+    
     let cameraService = CameraService()
 
     var showSegmentationStatus: Bool {
@@ -163,8 +165,14 @@ final class MainViewModel: ObservableObject {
                 croppedDishImage = cropResult.image
                 analysisProgress = 0.75
 
-                // 3. Deteksi sesuai model yang dipilih
-                let boxes = try await runDetection(on: cropResult.image)
+                // 3. Preprocessing (CLAHE grayscale) sebelum masuk ke model
+                let preprocessed = try clahePreprocessor.preprocess(cropResult.image)
+                guard !Task.isCancelled else { return }
+                preprocessedDishImage = preprocessed
+                analysisProgress = 0.8
+
+                // 4. Deteksi sesuai model yang dipilih
+                let boxes = try await runDetection(on: preprocessed)
                 guard !Task.isCancelled else { return }
                 detections = boxes
 
