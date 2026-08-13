@@ -105,14 +105,132 @@ final class CLAHEGrayscalePreprocessor {
     // MARK: - CLAHE (Fallback to Equalization)
 
     private func applyCLAHE(to buffer: inout vImage_Buffer) throws {
-        // PERBAIKAN 2: Apple tidak memiliki CLAHE.
-        // Sebagai gantinya, kita gunakan Histogram Equalization standar.
-        let err = vImageEqualization_Planar8(
-            &buffer,
-            &buffer,
-            vImage_Flags(kvImageNoFlags)
-        )
-        guard err == kvImageNoError else { throw PreprocessError.vImageError(err) }
+        let width = Int(buffer.width)
+        let height = Int(buffer.height)
+        let rowBytes = Int(buffer.rowBytes)
+        let dataPtr = buffer.data.bindMemory(to: UInt8.self, capacity: rowBytes * height)
+
+        let tilesX = tileGridWidth
+        let tilesY = tileGridHeight
+        let histSize = 256
+
+        // Ukuran tile pakai ceil division, sama seperti OpenCV.
+        let tileWidth = (width + tilesX - 1) / tilesX
+        let tileHeight = (height + tilesY - 1) / tilesY
+
+        // Hitung LUT (lookup table) hasil histogram-equalization ber-clip-limit
+        // untuk tiap tile, persis alur cv2.createCLAHE().apply():
+        // histogram -> clip -> redistribute sisa -> CDF -> scale ke 0...255.
+        var luts = [[UInt8]](repeating: [UInt8](repeating: 0, count: histSize), count: tilesX * tilesY)
+
+        for ty in 0..<tilesY {
+            for tx in 0..<tilesX {
+                let xStart = tx * tileWidth
+                let yStart = ty * tileHeight
+                let xEnd = min(xStart + tileWidth, width)
+                let yEnd = min(yStart + tileHeight, height)
+                let tileW = xEnd - xStart
+                let tileH = yEnd - yStart
+                let tileArea = tileW * tileH
+                guard tileArea > 0 else { continue }
+
+                var histogram = [Int](repeating: 0, count: histSize)
+                for y in yStart..<yEnd {
+                    let rowOffset = y * rowBytes
+                    for x in xStart..<xEnd {
+                        histogram[Int(dataPtr[rowOffset + x])] += 1
+                    }
+                }
+
+                // clipLimit param OpenCV di-scale relatif ke luas tile, sama
+                // seperti CLAHE_Impl::apply di clahe.cpp.
+                var clipLimitValue = 0
+                if clipLimit > 0 {
+                    clipLimitValue = max(
+                        Int((clipLimit * Float(tileArea) / Float(histSize)).rounded()),
+                        1
+                    )
+                }
+
+                if clipLimitValue > 0 {
+                    var clipped = 0
+                    for i in 0..<histSize {
+                        if histogram[i] > clipLimitValue {
+                            clipped += histogram[i] - clipLimitValue
+                            histogram[i] = clipLimitValue
+                        }
+                    }
+                    let redistBatch = clipped / histSize
+                    var residual = clipped - redistBatch * histSize
+                    for i in 0..<histSize {
+                        histogram[i] += redistBatch
+                    }
+                    if residual != 0 {
+                        let residualStep = max(histSize / residual, 1)
+                        var i = 0
+                        while i < histSize && residual > 0 {
+                            histogram[i] += 1
+                            residual -= 1
+                            i += residualStep
+                        }
+                    }
+                }
+
+                let lutScale = Float(histSize - 1) / Float(tileArea)
+                var sum = 0
+                var lut = [UInt8](repeating: 0, count: histSize)
+                for i in 0..<histSize {
+                    sum += histogram[i]
+                    let mapped = Float(sum) * lutScale
+                    lut[i] = UInt8(max(0, min(255, mapped.rounded())))
+                }
+                luts[ty * tilesX + tx] = lut
+            }
+        }
+
+        // Interpolasi bilinear antar 4 tile terdekat untuk tiap pixel, supaya
+        // tidak ada seam/patahan di batas antar tile (sama seperti perilaku
+        // default OpenCV CLAHE).
+        var output = [UInt8](repeating: 0, count: rowBytes * height)
+
+        for y in 0..<height {
+            let tileYFloat = (Float(y) - Float(tileHeight) / 2) / Float(tileHeight)
+            var ty0 = Int(floor(tileYFloat))
+            var wy = tileYFloat - Float(ty0)
+            if ty0 < 0 { ty0 = 0; wy = 0 }
+            if ty0 >= tilesY { ty0 = tilesY - 1 }
+            var ty1 = min(ty0 + 1, tilesY - 1)
+            if ty1 == ty0 { wy = 0 }
+
+            let rowOffset = y * rowBytes
+
+            for x in 0..<width {
+                let tileXFloat = (Float(x) - Float(tileWidth) / 2) / Float(tileWidth)
+                var tx0 = Int(floor(tileXFloat))
+                var wx = tileXFloat - Float(tx0)
+                if tx0 < 0 { tx0 = 0; wx = 0 }
+                if tx0 >= tilesX { tx0 = tilesX - 1 }
+                var tx1 = min(tx0 + 1, tilesX - 1)
+                if tx1 == tx0 { wx = 0 }
+
+                let value = Int(dataPtr[rowOffset + x])
+
+                let lut00 = Float(luts[ty0 * tilesX + tx0][value])
+                let lut01 = Float(luts[ty0 * tilesX + tx1][value])
+                let lut10 = Float(luts[ty1 * tilesX + tx0][value])
+                let lut11 = Float(luts[ty1 * tilesX + tx1][value])
+
+                let top = lut00 * (1 - wx) + lut01 * wx
+                let bottom = lut10 * (1 - wx) + lut11 * wx
+                let interpolated = top * (1 - wy) + bottom * wy
+
+                output[rowOffset + x] = UInt8(max(0, min(255, interpolated.rounded())))
+            }
+        }
+
+        output.withUnsafeBytes { rawPtr in
+            memcpy(buffer.data, rawPtr.baseAddress, rowBytes * height)
+        }
     }
 
     // MARK: - Back to 3-channel image
