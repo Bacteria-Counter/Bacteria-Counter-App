@@ -224,8 +224,15 @@ final class CameraService: NSObject, ObservableObject {
             return .unavailable
         }
 
-        let dimensions = output.maxPhotoDimensions
-        let resolution = if dimensions.width > 0, dimensions.height > 0 {
+        // Derived from the device's CURRENT active format, not from
+        // output.maxPhotoDimensions -- that property was assigned before
+        // startRunning(), while activeFormat was still the pre-session
+        // default, so reading it back reported a low resolution (640x480)
+        // that never matched what capture actually produced. Capture itself
+        // was always correct: makePhotoSettings() re-derives from
+        // activeFormat at capture time. This was a display bug only.
+        let dimensions = maximumPhotoDimensions(for: device.activeFormat)
+        let resolution = if let dimensions, dimensions.width > 0, dimensions.height > 0 {
             "\(dimensions.width)×\(dimensions.height)"
         } else {
             "-"

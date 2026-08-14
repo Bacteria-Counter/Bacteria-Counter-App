@@ -17,10 +17,44 @@ proxies, real deployment is the real test.
     accuracy cost in the "vague" background category (MAE 5.61 -> 8.72 on
     the same 18-image stratified sample). This is the default/recommended
     pipeline.
+  - "mac1": yolo_new fine-tuned further on external colony datasets (the
+    Mac Studio run of August 2026). The most accurate YOLO here on bright
+    plates -- on the 42-image PCA holdout, MAE 8.12 against yolo_new's 9.62,
+    and clearly better on dense plates (23.4 vs 35.6). Like every YOLO
+    variant it keeps a perfect empty-plate record (0/34, zero false
+    detections), which no SAM variant matches -- sam_tuned produces 48. So
+    this is the option to reach for when a false positive costs more than a
+    miss: sterility checks, negative controls, anything reported as "no
+    growth". It is not the accuracy leader overall (sam_tuned reaches 3.86)
+    and it heavily over-counts dense lab plates -- 437 on the plate where
+    280 was confirmed correct by eye.
+
   - "sam":  CLAHE contrast enhancement + FastSAM zero-shot segmentation +
     dish-boundary/shape filtering (see fastsam_colony_count.py). Useful for
     domains neither YOLO checkpoint has seen, but not held to the same
     validated accuracy as YOLO (MAE 35.11 on the same AGAR sample).
+    Settings frozen at their original values so older results stay
+    reproducible -- the August 2026 tuning is exposed as the two options
+    below instead of being folded in here.
+
+  - "sam_tuned": "sam" with its filter parameters tuned against a new
+    127-image bright-background benchmark (PCA), the first benchmark in this
+    project that resembles the Ciputra lab rather than AGAR. On a 42-image
+    holdout never used for tuning, measured through the production path:
+    MAE 5.36 -> 3.86, 2.9s -> 1.3s per photo, false positives on 34 empty
+    plates 62 -> 48. Best general accuracy of any option on bright plates.
+    Its blind spot is pinpoint colonies -- on the sparse lab plate it finds
+    22 where roughly 104 are visible.
+
+  - "sam_micro": "sam_tuned" plus a second pass at imgsz 4480 when the
+    plate's median colony is under 1.5% of the dish diameter. Built for
+    pinpoint colonies: 22 -> 104 on the sparse lab plate, both counts
+    confirmed by eye against the photo. Identical to sam_tuned on ordinary
+    plates (the second pass simply does not trigger) and on empty plates,
+    where escalation would be dangerous -- an earlier count-based trigger
+    was rejected precisely because empty plates always count low and so
+    always escalated, doubling their false positives. Costs ~8s instead of
+    ~1.3s on the plates where it does trigger.
   - "dog_blend", "clahe", "lab_ab": yolo_new further fine-tuned on the same
     data with a preprocessing technique baked into training (not just
     bolted onto inference, which was shown to cause a train/inference
@@ -63,17 +97,19 @@ and 32.22 vs 8.72) — deliberately not exposed here.
     Training was interrupted partway through (60 planned epochs, stopped
     early, still noisy epoch-to-epoch on its own validation metric when it
     stopped) -- this is NOT a finished model. On our AGAR ground truth:
-    MAE 6.26 (better than yolo_new's 8.72). Real-empty-background safety
-    check: 0/36 -- the cleanest of every model in this app. BUT on a
-    broader set of real photos it noticeably OVER-counts, sometimes badly
-    (137 -> 475 on one dense pale-colony plate) -- the predicted heatmap
-    lights up in roughly the right places but spreads too much density per
-    colony rather than one clean blob, consistent with unfinished/unstable
-    training rather than a fundamental flaw. No per-colony location is
-    produced at all (a heatmap isn't discrete detections), so this option
-    always returns an empty detections list -- the app will show a count
-    with no overlay circles for it. Training may resume later; this
-    checkpoint is a snapshot, not a final answer.
+    MAE 6.26 (better than yolo_new's 8.72), and 9.25 on the 42-image PCA
+    holdout. Real-empty-background safety check: 0/36 -- the cleanest of
+    every model in this app. This checkpoint is a snapshot, not a final
+    answer.
+
+    Shows a heatmap rather than circles, and that is a deliberate limit of
+    the method, not an omission. Drawing circles from density peaks was
+    tried and looked visibly misaligned on real plates: the density map is
+    96x96 for a 3120x4160 photo, so each cell covers 32x43 real pixels and
+    every peak snaps to that grid. Circles would assert a per-colony
+    position this model does not have. Raising the working size above 768
+    was also tried and made the count worse (9.68 at 1024, 10.22 at 1280),
+    so 768 stays.
 
 All YOLO variants (yolo_old/yolo_new/dog_blend/clahe/lab_ab) use an adaptive
 inference imgsz (see adaptive_imgsz()) instead of a fixed 1536 -- it's
@@ -122,6 +158,8 @@ YOLO_MODEL_PATHS = {
     "dog_blend": "dog_blend_best.pt",
     "clahe": "clahe_best.pt",
     "lab_ab": "lab_ab_best.pt",
+    "mac1": "mac1_best.pt",
+    "mac2": "mac2_best.pt",
 }
 YOLO_CONF = 0.4
 YOLO_IMGSZ = 1536  # fallback only -- used when the dish can't be detected
@@ -154,9 +192,65 @@ def adaptive_imgsz(img_bgr: np.ndarray) -> int:
     required = int(round(required / 32) * 32)  # YOLO requires multiples of 32
     return max(ADAPTIVE_IMGSZ_MIN, min(ADAPTIVE_IMGSZ_MAX, required))
 
+# "sam" -- ORIGINAL settings, deliberately left untouched. Everything tuned in
+# August 2026 is exposed as the separate "sam_tuned"/"sam_micro" options below
+# rather than folded in here, so a result produced with this model last month
+# can still be reproduced today.
 SAM_IMGSZ = 3840
 SAM_MIN_AREA_FRAC = 0.000005
 SAM_MAX_AREA_FRAC = 0.02
+
+# "sam_tuned" -- tuned 2026-08-12 against the PCA bright-background benchmark,
+# on a 42-image holdout never seen during tuning, and measured through this
+# production path rather than the tuning harness: MAE 5.36 -> 3.86, 2.9s ->
+# 1.3s per photo, false positives on 34 empty plates 62 -> 48.
+#
+# Three settings reverse "sam"'s defaults, each for a measured reason:
+#   - imgsz adaptive rather than a fixed 3840. Bigger is not better on ordinary
+#     plates: fixed 3840 and 3200 both scored worse, because the model stops
+#     recognising a colony once it fills far more of the frame than the scale
+#     it was tuned around.
+#   - dish margin 1.00; cropping the outer 6% discarded real colonies at the rim.
+#   - square-cell filter off. Written for grid-patterned backgrounds, on bright
+#     plates it rejects genuine colonies.
+#
+# conf stays at 0.2, not the 0.3 the sweep preferred. The sweep scored cached
+# masks generated at conf=0.05 and filtered upward, which is not how inference
+# runs -- generating at the threshold changes what NMS suppresses. Re-measured
+# here, 0.2 beat 0.3 on the holdout and avoided collapsing the sparse lab photo
+# from 22 colonies to 8.
+SAM_TUNED_CONF = 0.2
+SAM_TUNED_DISH_MARGIN_RATIO = 1.0
+SAM_TUNED_MIN_AREA_FRAC = 0.0000001
+SAM_TUNED_MAX_AREA_FRAC = 0.005
+SAM_TUNED_DROP_SQUARE_LIKE = False
+# Plates are labelled -- pen or a printed sticker -- and the writing sits
+# inside the dish where every geometric filter treats it as a colony. See
+# looks_like_marking(): colour distance catches ink of any hue, darkness
+# catches black marker and printed labels. "sam" keeps its original behaviour
+# and is deliberately not given this.
+SAM_TUNED_REJECT_MARKINGS = True
+
+# "sam_micro" -- sam_tuned plus a second pass at much higher resolution for
+# plates whose colonies are pinpoint. Both halves were confirmed on the lab
+# photos by the microbiologist: on the sparse plate the extra detections at
+# 4480 are real colonies (24 -> 104), on the dense plate the lower resolution
+# is the correct one (280, not 171).
+#
+# The trigger is colony SIZE, not colony count. A count-based rule was tried
+# first and rejected: empty plates always count low, so they always escalated
+# and their false positives doubled. Size separates the cases cleanly -- median
+# colony diameter over dish diameter puts the sparse plate at 1.08% and both
+# dense plates above 2.4%.
+#
+# The minimum count is a second guard rather than the trigger: below it there
+# are too few detections for a median to mean anything, and an empty plate
+# (1-2 spurious detections) can never reach it. On the 42-image holdout and 34
+# empty plates: MAE 3.86 -> 3.83, false positives unchanged at 48, firing on
+# 1 of 42 benchmark images and 0 of 34 empty plates.
+SAM_ESCALATE_IMGSZ = 4480
+SAM_ESCALATE_MIN_COUNT = 8
+SAM_ESCALATE_MAX_COLONY_PCT = 1.5
 
 CSRNET_CKPT_PATH = "csrnet_best.pt"
 CSRNET_WORKING_SIZE = 768
@@ -206,6 +300,8 @@ def make_lab_ab(img_bgr: np.ndarray) -> np.ndarray:
 YOLO_PREPROCESS = {
     "yolo_old": None,
     "yolo_new": None,
+    "mac1": None,
+    "mac2": None,
     "dog_blend": make_dog_blend,
     "clahe": make_clahe,
     "lab_ab": make_lab_ab,
@@ -236,17 +332,49 @@ def run_yolo(image_path: str, model_key: str) -> dict:
             "imageWidth": w, "imageHeight": h}
 
 
-def run_sam(image_path: str) -> dict:
+def run_sam(image_path: str, variant: str = "sam") -> dict:
+    """FastSAM counting. `variant` selects one of three exposed models:
+    "sam" (original settings), "sam_tuned", or "sam_micro"."""
     img_bgr = cv2.imread(image_path)
     h, w = img_bgr.shape[:2]
     clahe_bgr = make_clahe(img_bgr)
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         cv2.imwrite(tmp.name, clahe_bgr)
         clahe_path = tmp.name
-    count, kept, _dish = count_colonies_fastsam(
-        sam_model, clahe_path, imgsz=SAM_IMGSZ,
-        min_area_frac=SAM_MIN_AREA_FRAC, max_area_frac=SAM_MAX_AREA_FRAC,
+    # Measured on the original frame, not the CLAHE copy -- CLAHE changes
+    # contrast, and the dish circle it keys off must come from the same pixels
+    # the caller sees.
+    if variant == "sam":
+        count, kept, _dish = count_colonies_fastsam(
+            sam_model, clahe_path, imgsz=SAM_IMGSZ,
+            min_area_frac=SAM_MIN_AREA_FRAC, max_area_frac=SAM_MAX_AREA_FRAC,
+        )
+        return _sam_response(count, kept, w, h)
+
+    sam_args = dict(
+        conf=SAM_TUNED_CONF, min_circularity=0.75,
+        dish_margin_ratio=SAM_TUNED_DISH_MARGIN_RATIO,
+        min_area_frac=SAM_TUNED_MIN_AREA_FRAC,
+        max_area_frac=SAM_TUNED_MAX_AREA_FRAC,
+        drop_square_like=SAM_TUNED_DROP_SQUARE_LIKE,
+        reject_markings=SAM_TUNED_REJECT_MARKINGS, color_ref_bgr=img_bgr,
     )
+    count, kept, _dish = count_colonies_fastsam(
+        sam_model, clahe_path, imgsz=adaptive_imgsz(img_bgr), **sam_args)
+
+    if (variant == "sam_micro" and kept and _dish is not None
+            and count >= SAM_ESCALATE_MIN_COUNT):
+        median_area = float(np.median([k["area"] for k in kept]))
+        colony_pct = (median_area / np.pi) ** 0.5 / _dish[2] * 100
+        if colony_pct < SAM_ESCALATE_MAX_COLONY_PCT:
+            print(f"[sam_micro] koloni {colony_pct:.2f}% diameter cawan -- "
+                  f"ulangi pada imgsz {SAM_ESCALATE_IMGSZ}", flush=True)
+            count, kept, _dish = count_colonies_fastsam(
+                sam_model, clahe_path, imgsz=SAM_ESCALATE_IMGSZ, **sam_args)
+    return _sam_response(count, kept, w, h)
+
+
+def _sam_response(count: int, kept: list, w: int, h: int) -> dict:
     confidence = 0.0
     detections = []
     if kept:
@@ -310,10 +438,15 @@ def run_csrnet(image_path: str) -> dict:
         density = csrnet_model(img_t)
     count = float(density.sum().item())
 
-    # No discrete per-colony locations to draw as circles -- instead, render
-    # the density map itself as a color heatmap blended over the original
-    # photo, so there's still something honest to look at (this is exactly
-    # what the model actually produces, not a fabricated detection).
+    # Deliberately a heatmap and not circles. Circles were tried, drawn from
+    # peaks in the density map, and looked plainly misaligned against the
+    # colonies on the plate. The reason is structural rather than a tuning
+    # miss: for a 3120x4160 photo the density map is only 96x96, so one cell
+    # spans 32x43 real pixels and every peak snaps to that coarse grid -- and
+    # the square 768 resize distorts a portrait photo on top of that. A circle
+    # claims "the colony is here"; this model only supports "there is roughly
+    # this much colony around here". The heatmap states exactly that, and is
+    # what the model actually predicts rather than an inference drawn from it.
     density_map = density[0, 0].numpy()
     heat = cv2.normalize(density_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     heat_color = cv2.applyColorMap(heat, cv2.COLORMAP_JET)
@@ -384,7 +517,8 @@ def calculate_cfu_endpoint(request: CFURequest):
     }
 
 
-VALID_MODELS = ("yolo_old", "yolo_new", "sam", "dog_blend", "clahe", "lab_ab", "gsam2", "csrnet")
+VALID_MODELS = ("yolo_old", "yolo_new", "mac1", "mac2", "sam", "sam_tuned", "sam_micro",
+                "dog_blend", "clahe", "lab_ab", "gsam2", "csrnet")
 
 
 @app.post("/analyze")
@@ -396,9 +530,18 @@ async def analyze(image: UploadFile = File(...), model: str = Form(...)):
         tmp.write(await image.read())
         image_path = tmp.name
 
+    # Log what actually arrived. The app's CAPTURE panel reads
+    # output.maxPhotoDimensions at session-start time, which Continuity Camera
+    # renegotiates afterward -- so that display can be stale. This line reports
+    # the real photo, which is what any resolution claim should rest on.
+    _probe = cv2.imread(image_path)
+    if _probe is not None:
+        print(f"[analyze] model={model} foto diterima: {_probe.shape[1]}x{_probe.shape[0]} px",
+              flush=True)
+
     try:
-        if model == "sam":
-            result = run_sam(image_path)
+        if model in ("sam", "sam_tuned", "sam_micro"):
+            result = run_sam(image_path, model)
         elif model == "gsam2":
             result = run_gsam2(image_path)
         elif model == "csrnet":

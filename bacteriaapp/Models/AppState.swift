@@ -13,7 +13,11 @@ enum AppState: Equatable {
 enum ModelChoice: String, CaseIterable, Identifiable {
     case yoloOld = "yolo_old"
     case yoloNew = "yolo_new"
+    case mac1
+    case mac2
     case sam
+    case samTuned = "sam_tuned"
+    case samMicro = "sam_micro"
     case dogBlend = "dog_blend"
     case clahe
     case labAb = "lab_ab"
@@ -27,7 +31,11 @@ enum ModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .yoloOld: "Lama"
         case .yoloNew: "Baru"
+        case .mac1: "Mac1"
+        case .mac2: "Mac2"
         case .sam: "SAM"
+        case .samTuned: "SAM+"
+        case .samMicro: "SAM Mikro"
         case .dogBlend: "DoG"
         case .clahe: "CLAHE"
         case .labAb: "LAB a/b"
@@ -41,7 +49,11 @@ enum ModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .yoloOld: "YOLO (Lama)"
         case .yoloNew: "YOLO (Baru)"
-        case .sam: "SAM"
+        case .mac1: "YOLO Mac1 (paling aman)"
+        case .mac2: "YOLO Mac2"
+        case .sam: "SAM (asli)"
+        case .samTuned: "SAM Tersetel"
+        case .samMicro: "SAM Mikro (koloni sangat kecil)"
         case .dogBlend: "YOLO + DoG-blend"
         case .clahe: "YOLO + CLAHE"
         case .labAb: "YOLO + LAB a/b"
@@ -55,12 +67,17 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     /// story on real photos (see server.py for the full validation notes).
     var caveat: String? {
         switch self {
-        case .yoloOld, .yoloNew, .sam: nil
+        case .yoloOld, .yoloNew: nil
+        case .mac1: "YOLO paling akurat & tanpa deteksi palsu di cawan kosong (0/34). Pilih untuk kontrol negatif / uji sterilitas. Cenderung overcount di cawan sangat padat."
+        case .mac2: "Setara YOLO Baru, tanpa deteksi palsu di cawan kosong (0/34). Disediakan untuk perbandingan — mac1 lebih akurat di semua ukuran."
+        case .sam: "Setelan asli, dipertahankan agar hasil lama tetap bisa direproduksi. Untuk cawan terang, SAM+ lebih akurat dan lebih cepat."
+        case .samTuned: "Paling akurat & tercepat untuk cawan terang. Koloni sangat kecil bisa terlewat — pakai SAM Mikro untuk itu."
+        case .samMicro: "Untuk koloni sangat kecil (pinpoint). Sama dengan SAM+ di cawan biasa; naik resolusi hanya bila koloninya kecil, jadi lebih lambat (~8 detik)."
         case .dogBlend: "Eksperimental — mirip performa YOLO Baru"
         case .clahe: "Eksperimental — perbaikan sedang, belum divalidasi penuh"
         case .labAb: "Eksperimental — akurat di data uji, tapi berisiko meleset di koloni pucat"
         case .gsam2: "⚠️ Belum pernah dilatih ke data kita — pernah berhalusinasi di background kosong (36/36 foto). Uji dengan sangat hati-hati."
-        case .csrnet: "⚠️ Training belum selesai — cenderung overcounting di foto padat/kompleks. Tidak ada lingkaran deteksi (cuma angka total), karena pendekatannya beda total dari yang lain."
+        case .csrnet: "Pendekatan beda (peta kepadatan) — tampilannya heatmap, bukan lingkaran, karena model ini tidak menghasilkan posisi per koloni. Paling bersih di cawan kosong (0/36), tapi training belum selesai dan cenderung overcount di foto padat."
         }
     }
 }
