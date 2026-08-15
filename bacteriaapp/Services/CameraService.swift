@@ -17,6 +17,55 @@ final class CameraService: NSObject, ObservableObject {
     private var currentDevice: AVCaptureDevice?
     private var inFlightCaptureDelegate: PhotoCaptureDelegate?
     private let sessionQueue = DispatchQueue(label: "com.ameliacitra.bacteriaapp.camera.session")
+    private var notificationObservers: [NSObjectProtocol] = []
+    private var shouldRetryContinuityCamera = false
+
+    private let continuityCameraRetryCount = 5
+    private let continuityCameraRetryDelay: UInt64 = 400_000_000
+
+    var onConnectionLost: (() -> Void)?
+
+    override init() {
+        super.init()
+
+        let notificationCenter = NotificationCenter.default
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: AVCaptureDevice.wasDisconnectedNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let disconnectedDeviceID = (notification.object as? AVCaptureDevice)?.uniqueID
+                Task { @MainActor [weak self, disconnectedDeviceID] in
+                    self?.handleDeviceDisconnected(deviceID: disconnectedDeviceID)
+                }
+            }
+        )
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: AVCaptureSession.runtimeErrorNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let sessionID = (notification.object as? AVCaptureSession).map(ObjectIdentifier.init)
+                Task { @MainActor [weak self, sessionID] in
+                    self?.handleSessionFailure(sessionID: sessionID)
+                }
+            }
+        )
+        notificationObservers.append(
+            notificationCenter.addObserver(
+                forName: AVCaptureSession.wasInterruptedNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let sessionID = (notification.object as? AVCaptureSession).map(ObjectIdentifier.init)
+                Task { @MainActor [weak self, sessionID] in
+                    self?.handleSessionFailure(sessionID: sessionID)
+                }
+            }
+        )
+    }
 
     func startSession() async throws {
         guard captureSession == nil else {
@@ -32,24 +81,57 @@ final class CameraService: NSObject, ObservableObject {
                     return try await startSession()
                 }
                 isSessionRunning = true
+                shouldRetryContinuityCamera = false
             }
             return
         }
 
-        let candidates = cameraCandidates()
-        guard !candidates.isEmpty else {
-            throw CameraError.noDeviceFound
-        }
-
+        let retryContinuityCamera = shouldRetryContinuityCamera
         var lastError: Error?
-        for candidate in candidates {
+
+        // After a Continuity Camera disconnects, macOS can take a short time
+        // to publish the iPhone device again. Refresh discovery for each retry
+        // before falling back to the Mac camera.
+        let continuityAttempts = retryContinuityCamera ? continuityCameraRetryCount : 1
+        for attempt in 0..<continuityAttempts {
+            guard let candidate = cameraCandidates().first(where: { $0.isContinuityCamera }) else {
+                if !retryContinuityCamera {
+                    break
+                }
+
+                if attempt + 1 < continuityAttempts {
+                    try await Task.sleep(nanoseconds: continuityCameraRetryDelay)
+                }
+                continue
+            }
+
             do {
                 try await startSession(with: candidate.device, type: candidate.type)
+                shouldRetryContinuityCamera = false
                 return
             } catch {
                 lastError = error
                 clearSession()
             }
+
+            if attempt + 1 < continuityAttempts {
+                try await Task.sleep(nanoseconds: continuityCameraRetryDelay)
+            }
+        }
+
+        // Keep the MacBook camera as the final fallback. Discover it again so
+        // this candidate is also a fresh AVCaptureDevice instance.
+        guard let fallback = cameraCandidates().first(where: { !$0.isContinuityCamera }) else {
+            throw lastError ?? CameraError.noDeviceFound
+        }
+
+        do {
+            try await startSession(with: fallback.device, type: fallback.type)
+            shouldRetryContinuityCamera = false
+            return
+        } catch {
+            lastError = error
+            clearSession()
         }
 
         throw lastError ?? CameraError.noDeviceFound
@@ -92,7 +174,13 @@ final class CameraService: NSObject, ObservableObject {
         isSessionRunning = true
     }
 
-    private func cameraCandidates() -> [(device: AVCaptureDevice, type: String)] {
+    private struct CameraCandidate {
+        let device: AVCaptureDevice
+        let type: String
+        let isContinuityCamera: Bool
+    }
+
+    private func cameraCandidates() -> [CameraCandidate] {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.continuityCamera, .external, .builtInWideAngleCamera],
             mediaType: .video,
@@ -102,28 +190,42 @@ final class CameraService: NSObject, ObservableObject {
         // isContinuityCamera remains reliable even if an older configuration
         // reports the iPhone using a generic or built-in device type.
         let iPhone = discovery.devices.first(where: {
-            $0.isContinuityCamera
+            isContinuityCameraCandidate($0)
         })
 
         let builtIn = discovery.devices.first(where: {
-            !$0.isContinuityCamera && $0.deviceType == .builtInWideAngleCamera
+            !isContinuityCameraCandidate($0) && $0.deviceType == .builtInWideAngleCamera
         })
 
         return [
-            iPhone.map { ($0, "Continuity Camera") },
-            builtIn.map { ($0, "Mac built-in camera") }
+            iPhone.map { CameraCandidate(device: $0, type: "Continuity Camera", isContinuityCamera: true) },
+            builtIn.map { CameraCandidate(device: $0, type: "Mac built-in camera", isContinuityCamera: false) }
         ].compactMap { $0 }
     }
 
+    private func isContinuityCameraCandidate(_ device: AVCaptureDevice) -> Bool {
+        device.isContinuityCamera
+            || device.deviceType == .continuityCamera
+            || device.localizedName.localizedCaseInsensitiveContains("iPhone")
+    }
+
     func stopSession() {
-        sessionQueue.async { [captureSession] in
-            captureSession?.stopRunning()
+        let session = captureSession
+        sessionQueue.async {
+            session?.stopRunning()
         }
         isSessionRunning = false
     }
 
     private func clearSession() {
-        captureSession?.stopRunning()
+        let session = captureSession
+        sessionQueue.sync {
+            session?.stopRunning()
+        }
+        clearSessionReferences()
+    }
+
+    private func clearSessionReferences() {
         captureSession = nil
         photoOutput = nil
         currentDevice = nil
@@ -134,8 +236,51 @@ final class CameraService: NSObject, ObservableObject {
         isSessionRunning = false
     }
 
+    private func handleDeviceDisconnected(deviceID: String?) {
+        guard let deviceID,
+              let currentDevice,
+              deviceID == currentDevice.uniqueID else {
+            return
+        }
+
+        handleConnectionLost()
+    }
+
+    private func handleSessionFailure(sessionID: ObjectIdentifier?) {
+        guard let sessionID,
+              let captureSession,
+              ObjectIdentifier(captureSession) == sessionID else {
+            return
+        }
+
+        handleConnectionLost()
+    }
+
+    private func handleConnectionLost() {
+        guard captureSession != nil || photoOutput != nil || connectedDeviceName != nil else {
+            return
+        }
+
+        shouldRetryContinuityCamera = true
+
+        let session = captureSession
+        let delegate = inFlightCaptureDelegate
+        inFlightCaptureDelegate = nil
+
+        delegate?.cancel(with: CameraError.notConnected)
+
+        sessionQueue.sync {
+            session?.stopRunning()
+        }
+        clearSessionReferences()
+        onConnectionLost?()
+    }
+
     func capturePhoto() async throws -> NSImage {
-        guard let photoOutput else { throw CameraError.notConnected }
+        guard let photoOutput,
+              let captureSession else {
+            throw CameraError.notConnected
+        }
 
         return try await withCheckedThrowingContinuation { continuation in
             let delegate = PhotoCaptureDelegate { [weak self] result in
@@ -152,6 +297,18 @@ final class CameraService: NSObject, ObservableObject {
             )
 
             sessionQueue.async {
+                let hasActiveVideoConnection = photoOutput.connections.contains(where: {
+                    $0.isEnabled && $0.isActive
+                })
+
+                guard captureSession.isRunning, hasActiveVideoConnection else {
+                    delegate.cancel(with: CameraError.notConnected)
+                    Task { @MainActor [weak self] in
+                        self?.handleConnectionLost()
+                    }
+                    return
+                }
+
                 photoOutput.capturePhoto(with: settings, delegate: delegate)
             }
         }
@@ -337,6 +494,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         } else {
             completion(.failure(CameraService.CameraError.captureFailed))
         }
+    }
+
+    func cancel(with error: Error) {
+        guard !didComplete else { return }
+
+        didComplete = true
+        completion(.failure(error))
     }
 
     private var didComplete = false

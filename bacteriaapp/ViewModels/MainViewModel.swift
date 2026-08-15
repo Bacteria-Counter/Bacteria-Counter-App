@@ -33,6 +33,12 @@ final class MainViewModel: ObservableObject {
     
     let cameraService = CameraService()
 
+    init() {
+        cameraService.onConnectionLost = { [weak self] in
+            self?.handleCameraConnectionLost()
+        }
+    }
+
     var showSegmentationStatus: Bool {
         appState == .analyzing || appState == .complete
     }
@@ -97,7 +103,11 @@ final class MainViewModel: ObservableObject {
                 capturedImage = image
                 startAnalysis()
             } catch {
-                connectionError = error.localizedDescription
+                if case CameraService.CameraError.notConnected = error {
+                    handleCameraConnectionLost()
+                } else {
+                    connectionError = error.localizedDescription
+                }
             }
         }
     }
@@ -139,6 +149,30 @@ final class MainViewModel: ObservableObject {
         analysisImageSize = .zero
         analysisProgress = 0
         appState = standbyState
+    }
+
+    private func handleCameraConnectionLost() {
+        segmentationTask?.cancel()
+        segmentationTask = nil
+
+        isConnecting = false
+        isCapturing = false
+        isReanalyzing = false
+        connectionError = nil
+
+        deviceName = nil
+        deviceType = nil
+        captureSettings = .unavailable
+
+        capturedImage = nil
+        segmentationMask = nil
+        segmentationCoverage = nil
+        croppedDishImage = nil
+        preprocessedDishImage = nil
+        detections = []
+        analysisImageSize = .zero
+        analysisProgress = 0
+        appState = .disconnected
     }
 
 
