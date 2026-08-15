@@ -16,30 +16,41 @@ struct SidebarView: View {
                 
                 SidebarSection(title: "AI MODEL") {
                     Menu {
-                            ForEach(AIModelType.allCases) { model in
-                                Button(action: {
-                                    viewModel.selectedModel = model
-                                }) {
-                                    if viewModel.selectedModel == model {
-                                        Label(model.rawValue, systemImage: "checkmark")
-                                    } else {
-                                        Text(model.rawValue)
-                                    }
+                        ForEach(YOLOModelVariant.allCases) { variant in
+                            Button(action: {
+                                viewModel.selectedModel = variant
+                            }) {
+                                if viewModel.selectedModel == variant {
+                                    Label(variant.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(variant.displayName)
                                 }
                             }
-                        } label: {
-                            HStack {
-                                Text(viewModel.selectedModel.rawValue)
-                                Spacer()
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption)
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(.controlBackgroundColor))
-                            .cornerRadius(6)
                         }
+                    } label: {
+                        HStack {
+                            Text(viewModel.selectedModel.displayName)
+                                .foregroundColor(.white)              // eksplisit, jangan andalkan default
+                                .font(AppTheme.monoSmall)
+
+                            Spacer()
+
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.black.opacity(0.25))       // beda dari sidebarBackground
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)  // border supaya terlihat sbg tombol
+                        )
+                    }
+                    .menuStyle(.borderlessButton)   // hilangkan default macOS menu chrome yang kadang bentrok warna
                 }
 
                 SidebarSection(title: "CAPTURE") {
