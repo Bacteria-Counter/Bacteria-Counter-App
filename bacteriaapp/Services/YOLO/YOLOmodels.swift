@@ -10,6 +10,7 @@ import Foundation
 nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable {
     case v11s
     case v26s
+    case v26n
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         switch self {
         case .v11s: return "YOLOv11s"
         case .v26s: return "YOLOv26s"
+        case .v26n: return "YOLOv26n"
         }
     }
 
@@ -25,6 +27,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         switch self {
         case .v11s: return "YOLOv11s"
         case .v26s: return "YOLOv26s"
+        case .v26n: return "YOLOv26n"
         }
     }
 
@@ -32,6 +35,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         switch self {
         case .v11s: return 1024
         case .v26s: return 1280
+        case .v26n: return 1024
         }
     }
 
