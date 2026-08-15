@@ -16,8 +16,14 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisProgress: Double = 0
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
-    @Published var selectedModel: AIModelType = .yolo
+    @Published var selectedModel: YOLOModelVariant = .v26s {
+        didSet {
+            guard oldValue != selectedModel else { return }
+            rerunDetectionIfPossible()
+        }
+    }
     
+    @Published private(set) var isReanalyzing = false
     @Published private(set) var croppedDishImage: CGImage?
     @Published private(set) var detections: [BoundingBox] = []
     
@@ -127,10 +133,14 @@ final class MainViewModel: ObservableObject {
         capturedImage = nil
         segmentationMask = nil
         segmentationCoverage = nil
+        croppedDishImage = nil
+        preprocessedDishImage = nil   // penting: reset ini juga, jadi re-run guard aman
+        detections = []
         analysisImageSize = .zero
         analysisProgress = 0
         appState = standbyState
     }
+
 
     private func startAnalysis() {
         guard let capturedImage,
@@ -143,35 +153,29 @@ final class MainViewModel: ObservableObject {
         segmentationMask = nil
         segmentationCoverage = nil
         croppedDishImage = nil
+        preprocessedDishImage = nil
         detections = []
-        analysisImageSize = CGSize(
-            width: cgImage.width,
-            height: cgImage.height
-        )
+        analysisImageSize = CGSize(width: cgImage.width, height: cgImage.height)
         analysisProgress = 0.1
 
         segmentationTask = Task {
             do {
-                // 1. Segmentasi
                 let result = try await segmenter.makeMask(from: cgImage)
                 guard !Task.isCancelled else { return }
                 segmentationMask = result.mask
                 segmentationCoverage = result.foregroundFraction
                 analysisProgress = 0.5
 
-                // 2. Crop bulat (dilebihkan sedikit dari mask)
                 let cropResult = try DishCropper.crop(image: cgImage, mask: result.mask)
                 guard !Task.isCancelled else { return }
                 croppedDishImage = cropResult.image
                 analysisProgress = 0.75
 
-                // 3. Preprocessing (CLAHE grayscale) sebelum masuk ke model
                 let preprocessed = try clahePreprocessor.preprocess(cropResult.image)
                 guard !Task.isCancelled else { return }
                 preprocessedDishImage = preprocessed
                 analysisProgress = 0.8
 
-                // 4. Deteksi sesuai model yang dipilih
                 let boxes = try await runDetection(on: preprocessed)
                 guard !Task.isCancelled else { return }
                 detections = boxes
@@ -186,24 +190,41 @@ final class MainViewModel: ObservableObject {
                 segmentationMask = nil
                 segmentationCoverage = nil
                 croppedDishImage = nil
+                preprocessedDishImage = nil
                 detections = []
                 appState = standbyState
             }
         }
     }
+    
+    private func rerunDetectionIfPossible() {
+        guard let preprocessedDishImage else { return }
+        guard appState == .complete || appState == .analyzing else { return }
+
+        // Batalkan task lama (baik full pipeline maupun re-run sebelumnya)
+        segmentationTask?.cancel()
+        connectionError = nil
+        isReanalyzing = true
+        detections = []
+
+        segmentationTask = Task {
+            defer { isReanalyzing = false }
+            do {
+                let boxes = try await runDetection(on: preprocessedDishImage)
+                guard !Task.isCancelled else { return }
+                detections = boxes
+                appState = .complete
+            } catch is CancellationError {
+                return
+            } catch {
+                connectionError = error.localizedDescription
+                detections = []
+            }
+        }
+    }
 
     private func runDetection(on image: CGImage) async throws -> [BoundingBox] {
-        switch selectedModel {
-        case .yolo:
-            return try await yoloDetector.detect(in: image)
-        case .retinaNet:
-            // TODO: implement RetinaNetDetector, sama pola dengan YOLODetector.
-            throw NSError(
-                domain: "MainViewModel",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "RetinaNet inference belum diimplementasikan."]
-            )
-        }
+        try await yoloDetector.detect(in: image, variant: selectedModel)
     }
 
     private var standbyState: AppState {
@@ -222,12 +243,4 @@ final class MainViewModel: ObservableObject {
     func exportReport() {
         // Placeholder for export functionality
     }
-}
-
-
-enum AIModelType: String, CaseIterable, Identifiable {
-    case yolo = "YOLO"
-    case retinaNet = "RetinaNet"
-
-    var id: String { self.rawValue }
 }
