@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A6A5C0PE01000000000003 /* AgarScopeKit in Frameworks */ = {isa = PBXBuildFile; productRef = A6A5C0PE01000000000002 /* AgarScopeKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		6564F4113018456D00FD5F96 /* bacteriaapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bacteriaapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A6A5C0PE01000000000003 /* AgarScopeKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 			);
 			name = bacteriaapp;
 			packageProductDependencies = (
+				A6A5C0PE01000000000002 /* AgarScopeKit */,
 			);
 			productName = bacteriaapp;
 			productReference = 6564F4113018456D00FD5F96 /* bacteriaapp.app */;
@@ -107,6 +113,9 @@
 			);
 			mainGroup = 6564F4083018456D00FD5F96;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A6A5C0PE01000000000001 /* XCLocalSwiftPackageReference "AgarScopeKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6564F4123018456D00FD5F96 /* Products */;
 			projectDirPath = "";
@@ -346,6 +355,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A6A5C0PE01000000000001 /* XCLocalSwiftPackageReference "AgarScopeKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = AgarScopeKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A6A5C0PE01000000000002 /* AgarScopeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgarScopeKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6564F4093018456D00FD5F96 /* Project object */;
 }

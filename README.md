@@ -5,37 +5,63 @@ A macOS app for counting bacterial colonies from a captured petri dish photo
 
 ## Running colony analysis
 
-Colony counting runs through a local Python server, not bundled into the app.
-Before capturing a plate:
+Nothing to start. Counting runs on-device through `AgarScopeKit/`, a Swift
+package in this repo that drives Core ML models bundled with the app. Open it,
+connect the camera, pick a model in the sidebar, capture a plate.
 
-1. Start the inference server (only needs to be done once per session):
-   ```bash
-   /path/to/bacterial-colony-detection/start_server.sh
-   ```
-   Leave that terminal running. It loads models once at startup, so the
-   first run takes a few seconds; keep it open while using the app.
-2. Open the app, connect the camera, capture a plate.
-3. In the sidebar, pick which model to use before capturing. All 8 are kept
-   in the app on purpose so results can be compared on real lab photos
-   rather than ground-truth benchmarks alone — see each one's in-app caveat,
-   and `server.py` in the bacterial-colony-detection repo for full
-   validation notes:
-   - **YOLO (Lama)** / **YOLO (Baru)** — the production YOLOv8n counters.
-     Validated on the AGAR benchmark dataset, but only for that same visual
-     domain (plain agar, no printed grid/background).
-   - **SAM** — CLAHE contrast enhancement + FastSAM zero-shot segmentation.
-     No training data needed, so it degrades more gracefully on new
-     backgrounds, but isn't validated to the same accuracy standard as YOLO —
-     treat its counts as an estimate, not ground truth.
-   - **YOLO + DoG-blend / + CLAHE / + LAB a/b** — experimental variants with
-     preprocessing baked into training. LAB a/b scores best on the AGAR
-     benchmark but is more likely to miss pale/same-hue colonies.
-   - **Colony Grounded SAM2** — zero-shot, never fine-tuned on our data.
-     Known to hallucinate detections on empty backgrounds — use carefully.
-   - **CSRNet (density map)** — a different architecture (density-map
-     regression instead of box detection): no per-colony detection circles,
-     just a heatmap + total count. Training isn't finished; tends to
-     overcount on dense/complex plates.
+This replaced a local Python server (`Server/server.py`) that had to be
+launched by hand before the app was any use. The move was made model by model
+rather than in one step, and each pipeline was measured against the Python path
+on the same 76 plates before it was allowed to replace it — those numbers, and
+the flags that reproduce them, are in `AgarScopeKit/README.md`.
 
-If the app shows "Can't reach the local model server," the server in step 1
-isn't running.
+`Server/` is still here. It is no longer needed to run the app, and it is where
+every accuracy figure quoted below was originally measured.
+
+## Which model to pick
+
+All ten run on-device. Each one's caveat is shown next to the picker in the
+app; the short version:
+
+- **YOLO (Lama) / (Baru)** — the production YOLOv8n counters. Validated on the
+  AGAR benchmark, but only for that visual domain (plain agar, no printed grid).
+- **YOLO Mac1 / Mac2** — fine-tuned further on external colony datasets. Mac1
+  is the most accurate YOLO here and, like every YOLO variant, produces zero
+  false detections on 34 empty plates. Reach for it when a false positive costs
+  more than a miss: sterility checks, negative controls, anything reported as
+  "no growth".
+- **SAM+ (`sam_tuned`)** — CLAHE + FastSAM + dish/shape filtering, tuned on a
+  bright-background benchmark. Best general accuracy on bright plates
+  (MAE 3.86). Its blind spot is pinpoint colonies.
+- **SAM Mikro (`sam_micro`)** — SAM+ plus a second pass at imgsz 4480 when the
+  plate's median colony is under 1.5% of the dish diameter. Identical to SAM+
+  on ordinary plates; slower on the ones where it fires.
+- **YOLO + DoG-blend / + CLAHE / + LAB a/b** — experimental variants with
+  preprocessing baked into training. LAB a/b scores well on AGAR but is more
+  likely to miss pale, low-colour-contrast colonies.
+- **CSRNet (density map)** — a different architecture: density-map regression
+  rather than box detection. No per-colony circles, just a heatmap and a total.
+  Cleanest of all on empty plates; training was never finished, and it
+  overcounts on dense plates.
+
+Two options the server offered are deliberately gone:
+
+- **`sam`**, the frozen ORIGINAL FastSAM settings, existed only to reproduce
+  results from before August 2026 and was the least accurate option here
+  (MAE 35.11 against SAM+'s 3.86). It needed a Core ML export at 3840 that was
+  never made. The FastSAM actually relied on — SAM+ and SAM Mikro — is
+  untouched.
+- **Colony Grounded SAM2** was never converted: 1.1 GB, a separate dependency
+  tree, and it failed the empty-plate safety check at 36/36 photos, inventing
+  colonies out of paper texture.
+
+Both still work through `Server/server.py` if an old figure ever needs
+reproducing exactly.
+
+## Models
+
+`bacteriaapp/coreml_models/` holds the 34 Core ML files, quantised to int8
+(627 MB to 215 MB). Xcode compiles each into a `.mlmodelc` in the app bundle.
+Set `AGARSCOPE_MODELS` to a directory of `.mlpackage` or `.mlmodelc` files to
+run against a different set — that is how the quantised models were measured
+against the float32 originals.

@@ -16,7 +16,10 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisResult: AnalysisResult?
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
-    @Published var selectedModel: ModelChoice = .yoloNew
+    // Defaults to the counter rather than the sterility check: counting is
+    // what the app is opened for, and SAM is the most accurate option on
+    // bright plates by a wide margin (MAE 5.4 against Mac1's 8.3).
+    @Published var selectedModel: ModelChoice = .samMicro
 
     let cameraService = CameraService()
     private let inferenceService = InferenceService()
@@ -157,9 +160,10 @@ final class MainViewModel: ObservableObject {
         let model = selectedModel
 
         analysisTask = Task {
-            // Indeterminate progress while the request is in flight — the
-            // server doesn't stream partial progress, so this just gives
-            // visual feedback rather than tracking real completion percent.
+            // Indeterminate progress while inference runs. The pipeline has
+            // no meaningful intermediate percentage to report — it is one
+            // Core ML pass plus filtering — so this is visual feedback, not
+            // a measurement of how far along it is.
             let progressTask = Task {
                 while !Task.isCancelled && analysisProgress < 0.9 {
                     analysisProgress += 0.03
