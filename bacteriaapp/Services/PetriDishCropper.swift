@@ -63,11 +63,17 @@ nonisolated enum DishCropper {
 
         let (center, radius) = try boundingCircle(of: mask, scaleX: scaleX, scaleY: scaleY)
 
-        return try makeCircularCrop(
-            from: image,
-            center: center,
-            radius: radius * (1 + paddingRatio)
-        )
+        // Clamped so the crop can never come out BIGGER than the photo it came
+        // from. makeCircularCrop allocates a diameter x diameter canvas with no
+        // reference to the source size, so an over-covering mask produced a crop
+        // with more pixels than the original -- which made every downstream
+        // stage slower than not cropping at all, the opposite of the point.
+        // A dish that is fully in frame cannot be wider than the short side, and
+        // anything past that edge is black padding carrying no colonies.
+        let limit = CGFloat(min(image.width, image.height)) / 2
+        let padded = min(radius * (1 + paddingRatio), limit)
+
+        return try makeCircularCrop(from: image, center: center, radius: padded)
     }
 
     /// Mencari titik pusat (median, robust terhadap outlier) dan radius

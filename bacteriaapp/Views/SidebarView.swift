@@ -15,30 +15,21 @@ struct SidebarView: View {
                 }
 
                 SidebarSection(title: "MODEL") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        // One flat list of all six. Which codebase a model came
-                        // from is not a question about plates, and the one
-                        // preprocessing step a technician could reasonably care
-                        // about -- the dish crop -- is shared by all of them.
-                        Picker("Model", selection: Binding(
-                            get: { viewModel.selectedModel },
-                            set: { viewModel.selectModel($0) }
-                        )) {
-                            ForEach(ModelChoice.allCases) { choice in
-                                Text(choice.fullDisplayName).tag(choice)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .disabled(viewModel.appState == .analyzing)
-
-                        if let caveat = viewModel.selectedModel.caveat {
-                            Text(caveat)
-                                .font(AppTheme.monoSmall)
-                                .foregroundStyle(AppTheme.accentOrange)
-                                .fixedSize(horizontal: false, vertical: true)
+                    // One flat list. Which codebase a model came from is not a
+                    // question about plates, and the one preprocessing step a
+                    // technician could reasonably care about -- the dish crop --
+                    // is shared by all of them.
+                    Picker("Model", selection: Binding(
+                        get: { viewModel.selectedModel },
+                        set: { viewModel.selectModel($0) }
+                    )) {
+                        ForEach(ModelChoice.allCases) { choice in
+                            Text(choice.displayName).tag(choice)
                         }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .disabled(viewModel.appState == .analyzing)
                 }
 
                 // Shown only when segmentation failed, because that changes what

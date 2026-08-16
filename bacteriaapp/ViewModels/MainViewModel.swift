@@ -29,6 +29,15 @@ final class MainViewModel: ObservableObject {
     /// trained on cropped plates and have no equivalent fallback, so they refuse.
     @Published private(set) var usedFullFrame = false
 
+    /// Which stage is running, shown in the status bar while analyzing.
+    ///
+    /// Worth the two lines: a plate that takes eight seconds and a plate that
+    /// has hung look identical when the only feedback is a progress bar that
+    /// invents its own percentage. Each stage also prints its own duration and
+    /// the pixel count it worked on, so a slow run can be reported as numbers
+    /// rather than as an impression.
+    @Published private(set) var analysisStage: String?
+
     let cameraService = CameraService()
     private let inferenceService = InferenceService()
     private let segmenter = PetriDishSegmenter()
@@ -53,7 +62,7 @@ final class MainViewModel: ObservableObject {
         case .connected:
             return "Live preview · \(captureSettings.resolution) · \(captureSettings.focus) · \(deviceName ?? "Camera")"
         case .analyzing:
-            return "Analyzing · \(Int(analysisProgress * 100))% · \(colonyCount) colonies detected"
+            return "\(analysisStage ?? "Analyzing") · \(Int(analysisProgress * 100))%"
         case .complete:
             guard let result = analysisResult else { return "Complete" }
             let base = "Complete · \(result.totalColonies) colonies · avg conf "
@@ -235,19 +244,26 @@ final class MainViewModel: ObservableObject {
                     throw PreparationError.cropRequired
                 }
 
+                analysisStage = "Menghitung koloni"
+                let t = Date()
                 let result = try await inferenceService.analyze(
                     image: prepared, model: model, usedFullFrame: usedFullFrame
                 )
+                Self.log("hitung \(model.rawValue)", since: t,
+                         pixels: prepared.width * prepared.height,
+                         extra: "\(result.totalColonies) koloni")
                 guard !Task.isCancelled else { return }
 
                 colonyCount = result.totalColonies
                 analysisProgress = 1.0
                 analysisResult = result
+                analysisStage = nil
                 appState = .complete
             } catch {
                 guard !Task.isCancelled else { return }
                 connectionError = error.localizedDescription
                 analysisProgress = 0
+                analysisStage = nil
                 appState = isDeviceConnected ? .connected : .disconnected
             }
         }
@@ -266,18 +282,26 @@ final class MainViewModel: ObservableObject {
             throw PreparationError.imageUnreadable
         }
 
+        analysisStage = "Mencari cawan"
+        let tSeg = Date()
         let mask = try? await segmenter.makeMask(from: full)
+        Self.log("segmentasi", since: tSeg, pixels: full.width * full.height,
+                 extra: mask == nil ? "GAGAL" : "ok")
 
-        // Cropping draws a canvas the size of the dish, and on a 48 MP capture
+        // Cropping draws a canvas the size of the dish, and on a big capture
         // that is tens of megapixels of work. Off the main actor so the window
         // keeps repainting: the analysis genuinely takes seconds on a big photo,
         // and a frozen UI makes seconds look like a hang.
+        analysisStage = "Memotong cawan"
+        let tCrop = Date()
         let (prepared, fellBack) = await Task.detached(priority: .userInitiated) {
             if let mask, let cropped = try? DishCropper.crop(image: full, mask: mask.mask).image {
                 return (Self.capped(cropped), false)
             }
             return (Self.capped(full), true)
         }.value
+        Self.log("potong", since: tCrop, pixels: prepared.width * prepared.height,
+                 extra: fellBack ? "foto utuh" : "\(prepared.width)x\(prepared.height)")
 
         preparedCGImage = prepared
         preparedImage = NSImage(cgImage: prepared,
@@ -331,6 +355,16 @@ final class MainViewModel: ObservableObject {
                     + "potongan itu. Pilih SAM, Mac1, atau CSRNet, atau ambil ulang fotonya."
             }
         }
+    }
+
+    /// One line per stage in the Xcode console. Kept to stdout rather than a
+    /// logging framework so it can be copied out of a run and pasted into a bug
+    /// report without any setup.
+    nonisolated private static func log(_ stage: String, since: Date,
+                                        pixels: Int, extra: String) {
+        print(String(format: "[AgarScope] %@ %.2fs %.1f MP %@",
+                     stage, Date().timeIntervalSince(since),
+                     Double(pixels) / 1_000_000, extra))
     }
 
     private static func cgImage(from image: NSImage) -> CGImage? {

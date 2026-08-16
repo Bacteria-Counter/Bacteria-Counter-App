@@ -23,6 +23,13 @@ enum AppState: Equatable {
 /// colonies at 0.61-0.90 confidence from the identical crop, v26n's highest
 /// confidence is 0.0005. Its authors are investigating. The model file is still
 /// in the bundle, so putting the case back is a one-line change.
+/// The raw values are the model FILE names on disk (`mac1_1280.mlpackage` and
+/// friends) and the keys AgarScopeKit dispatches on, so they are not display
+/// text and must not be renamed casually. `mac1` is a YOLOv8n, confirmed twice:
+/// its checkpoint holds 3,108,116 parameters and its int8 Core ML weights are
+/// 3.3 MB, both of which are the v8n scale and nowhere near v8s's ~11 M.
+/// Renaming the files, the benchmark scripts and the reports to match the
+/// displayed names is a separate pass.
 enum ModelChoice: String, CaseIterable, Identifiable {
     case samMicro = "sam_micro"
     case mac1
@@ -50,8 +57,8 @@ enum ModelChoice: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .samMicro: "SAM"
-        case .mac1: "Mac1"
+        case .samMicro: "FastSAM"
+        case .mac1: "YOLOv8n"
         case .csrnet: "CSRNet"
         case .v11s: "YOLOv11s"
         case .v26s: "YOLOv26s"
@@ -61,34 +68,7 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     /// Full label for the picker and the status bar. Named by the job rather
     /// than the architecture: naming them by architecture is what led to models
     /// being picked by the wrong criterion once already.
-    var fullDisplayName: String {
-        switch self {
-        case .samMicro: "SAM — penghitung utama"
-        case .mac1: "Mac1 — pembanding"
-        case .csrnet: "CSRNet — pembanding"
-        case .v11s: "YOLOv11s"
-        case .v26s: "YOLOv26s"
-        }
-    }
-
-    /// One line under the picker, about USING the model rather than about how it
-    /// scored. A technician needs to know when to distrust the number in front
-    /// of them; benchmark figures answer a question they did not ask, and a
-    /// paragraph of them stops being read at all.
-    var caveat: String? {
-        switch self {
-        case .samMicro:
-            "Pakai ini untuk menghitung. Periksa ulang bila latar fotonya berubah."
-        case .mac1:
-            "Pembanding. Zoom untuk memeriksa kotak yang meragukan."
-        case .csrnet:
-            "Pembanding angka, tanpa kotak. Bisa melapor nol di cawan yang sangat sepi."
-        case .v11s:
-            "Melewatkan koloni yang sangat kecil."
-        case .v26s:
-            "Berhenti di 300 koloni. Cawan lebih padat akan dilaporkan kurang."
-        }
-    }
+    var fullDisplayName: String { displayName }
 }
 
 struct CaptureSettings: Equatable {
