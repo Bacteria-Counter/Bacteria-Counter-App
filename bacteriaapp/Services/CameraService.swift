@@ -414,9 +414,13 @@ final class CameraService: NSObject, ObservableObject {
         // that never matched what capture actually produced. Capture itself
         // was always correct: makePhotoSettings() re-derives from
         // activeFormat at capture time. This was a display bug only.
+        // Reported as the SQUARE that is kept, not as the sensor's own frame.
+        // A plate is round, so the app squares every camera frame before
+        // counting and the sides never reach a model. Printing 1920x1080 next
+        // to a square preview would describe pixels the technician cannot use.
         let dimensions = maximumPhotoDimensions(for: device.activeFormat)
         let resolution = if let dimensions, dimensions.width > 0, dimensions.height > 0 {
-            "\(dimensions.width)×\(dimensions.height)"
+            "\(min(dimensions.width, dimensions.height))×\(min(dimensions.width, dimensions.height))"
         } else {
             "-"
         }

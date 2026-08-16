@@ -41,7 +41,13 @@ struct MainViewportView: View {
             }
         } else if viewModel.appState == .connected,
                   let session = viewModel.cameraService.previewSession {
+            // Square, because a square is what capture keeps. The preview layer
+            // fills its view by cropping the sides, so this shows exactly the
+            // frame the models will be given -- framing a plate in a 16:9
+            // preview and then storing a centre square would hide from the
+            // technician which part of their shot survives.
             CameraPreviewView(session: session)
+                .aspectRatio(1, contentMode: .fit)
         } else {
             EmptyView()
         }
