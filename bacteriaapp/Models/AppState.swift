@@ -17,13 +17,18 @@ enum AppState: Equatable {
 /// there is one preprocessing decision a technician could care about and it has
 /// already been made for them. Showing an engine picker would ask them to know
 /// which team wrote which model, which is not a question about plates.
+/// YOLOv26n is deliberately absent. It reports zero colonies on dense plates --
+/// six of the 126 PCA plates and both dense lab photos -- and the cause is in
+/// the checkpoint, not the integration: on an image where YOLOv26s finds 220
+/// colonies at 0.61-0.90 confidence from the identical crop, v26n's highest
+/// confidence is 0.0005. Its authors are investigating. The model file is still
+/// in the bundle, so putting the case back is a one-line change.
 enum ModelChoice: String, CaseIterable, Identifiable {
     case samMicro = "sam_micro"
     case mac1
     case csrnet
     case v11s
     case v26s
-    case v26n
 
     var id: String { rawValue }
 
@@ -34,7 +39,7 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     var engine: Engine {
         switch self {
         case .samMicro, .mac1, .csrnet: .agarScope
-        case .v11s, .v26s, .v26n: .labYOLO
+        case .v11s, .v26s: .labYOLO
         }
     }
 
@@ -50,7 +55,6 @@ enum ModelChoice: String, CaseIterable, Identifiable {
         case .csrnet: "CSRNet"
         case .v11s: "YOLOv11s"
         case .v26s: "YOLOv26s"
-        case .v26n: "YOLOv26n"
         }
     }
 
@@ -60,35 +64,29 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     var fullDisplayName: String {
         switch self {
         case .samMicro: "SAM — penghitung utama"
-        case .mac1: "Mac1 — pembanding visual"
-        case .csrnet: "CSRNet — pembanding angka"
-        case .v11s: "YOLOv11s — lab"
-        case .v26s: "YOLOv26s — lab"
-        case .v26n: "YOLOv26n — lab"
+        case .mac1: "Mac1 — pembanding"
+        case .csrnet: "CSRNet — pembanding"
+        case .v11s: "YOLOv11s"
+        case .v26s: "YOLOv26s"
         }
     }
 
-    /// One-line caveat under the picker.
-    ///
-    /// Every figure is from 126 bright PCA plates with ground truth, each model
-    /// through its own chain, all with the shared dish crop in front
-    /// (`coreml_tools/eval_cross.py`). The three lab photos are quoted only
-    /// where their count was confirmed by eye, and they are still estimates
-    /// until the measured ground truth lands.
+    /// One line under the picker, about USING the model rather than about how it
+    /// scored. A technician needs to know when to distrust the number in front
+    /// of them; benchmark figures answer a question they did not ask, and a
+    /// paragraph of them stops being read at all.
     var caveat: String? {
         switch self {
         case .samMicro:
-            "Penghitung utama, paling akurat di cawan terang (MAE 4,5). Otomatis mengulang di resolusi tinggi bila koloninya kecil. RAPUH terhadap latar baru: pada latar yang belum pernah ia lihat, ia bisa menghitung tekstur sebagai koloni tanpa memberi tanda."
+            "Pakai ini untuk menghitung. Periksa ulang bila latar fotonya berubah."
         case .mac1:
-            "Pembanding visual. Menggambar kotak per koloni, jadi kalau angkanya jauh berbeda dari SAM kamu bisa zoom dan menilai sendiri. Jangan dipakai sebagai angka utama."
+            "Pembanding. Zoom untuk memeriksa kotak yang meragukan."
         case .csrnet:
-            "Pembanding angka, satu-satunya tanpa bias sistematis. Tampil sebagai heatmap karena metode ini tidak menghasilkan posisi per koloni, jadi selisihnya tidak bisa diperiksa dengan mata. Melapor NOL pada sebagian cawan yang isinya di bawah 5 koloni."
+            "Pembanding angka, tanpa kotak. Bisa melapor nol di cawan yang sangat sepi."
         case .v11s:
-            "Model lab. Terbaik di data AGAR (MAE 0,6) tapi turun jauh di cawan PCA (11,0). Melewatkan koloni pinpoint."
+            "Melewatkan koloni yang sangat kecil."
         case .v26s:
-            "Model lab, terbaik dari ketiganya di cawan PCA (MAE 9,7). TIDAK BISA melapor lebih dari 300 koloni: batas itu terkunci di berkas modelnya, dan cawan yang lebih padat akan berhenti di 300 tanpa memberi tanda."
-        case .v26n:
-            "Model lab. BELUM ANDAL: melapor NOL koloni pada sebagian cawan padat, termasuk dua foto lab. Sedang diperiksa oleh penulisnya."
+            "Berhenti di 300 koloni. Cawan lebih padat akan dilaporkan kurang."
         }
     }
 }

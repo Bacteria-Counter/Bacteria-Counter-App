@@ -266,21 +266,55 @@ final class MainViewModel: ObservableObject {
             throw PreparationError.imageUnreadable
         }
 
-        var prepared = full
-        var fellBack = false
-        do {
-            let mask = try await segmenter.makeMask(from: full)
-            prepared = try DishCropper.crop(image: full, mask: mask.mask).image
-        } catch {
-            prepared = full
-            fellBack = true
-        }
+        let mask = try? await segmenter.makeMask(from: full)
+
+        // Cropping draws a canvas the size of the dish, and on a 48 MP capture
+        // that is tens of megapixels of work. Off the main actor so the window
+        // keeps repainting: the analysis genuinely takes seconds on a big photo,
+        // and a frozen UI makes seconds look like a hang.
+        let (prepared, fellBack) = await Task.detached(priority: .userInitiated) {
+            if let mask, let cropped = try? DishCropper.crop(image: full, mask: mask.mask).image {
+                return (Self.capped(cropped), false)
+            }
+            return (Self.capped(full), true)
+        }.value
 
         preparedCGImage = prepared
         preparedImage = NSImage(cgImage: prepared,
                                 size: NSSize(width: prepared.width, height: prepared.height))
         usedFullFrame = fellBack
         return prepared
+    }
+
+    /// The largest input any model here consumes is 4480 -- sam_micro's
+    /// escalation pass, and every other size is below it. Pixels beyond that
+    /// are letterboxed away before inference, but they are NOT free: the mask
+    /// post-processing allocates one buffer per colony at the input's own
+    /// resolution, so cost grows with colonies times pixels. On a 48 MP photo
+    /// that is 1.45 GB of allocation for detections the model never saw at that
+    /// resolution anyway, and it measured 20.5 s against 1.8 s for a 12 MP photo
+    /// of the same plate.
+    ///
+    /// The area filters are fractions of the image area and circularity is
+    /// scale-free, so nothing downstream reads absolute pixels.
+    /// nonisolated: this runs inside the detached task above, and a MainActor
+    /// method would have to hop back to the main thread to do it -- which is the
+    /// hop the detached task exists to avoid.
+    nonisolated private static func capped(_ image: CGImage, longSide: Int = 4480) -> CGImage {
+        let side = max(image.width, image.height)
+        guard side > longSide else { return image }
+
+        let scale = Double(longSide) / Double(side)
+        let w = Int((Double(image.width) * scale).rounded())
+        let h = Int((Double(image.height) * scale).rounded())
+        guard let context = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+            space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return context.makeImage() ?? image
     }
 
     private enum PreparationError: LocalizedError {

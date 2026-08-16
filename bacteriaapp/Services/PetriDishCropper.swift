@@ -45,19 +45,28 @@ nonisolated enum DishCropper {
         image: CGImage,
         mask: CGImage
     ) throws -> DishCropResult {
-        let (center, radius) = try boundingCircle(of: mask)
-
+        // The mask comes back 512x512 square because the segmenter feeds Vision
+        // with .scaleFill, which STRETCHES the photo rather than letterboxing
+        // it. A round dish therefore arrives as an ellipse whenever the photo is
+        // not square, and the lab's photos are 3:4.
+        //
+        // So the circle is fitted in the ORIGINAL image's coordinates, not the
+        // mask's: every foreground pixel is mapped back per axis first, and only
+        // then does a centre and a radius mean anything. Scaling a radius
+        // measured in the stretched space cannot be made correct by any single
+        // factor -- the previous code used the mean of the two axis scales,
+        // which on a 3:4 photo inflated the radius by about 17% before the 8%
+        // padding was even added, and that is the ring of bench paper that ended
+        // up inside the crop.
         let scaleX = CGFloat(image.width) / CGFloat(mask.width)
         let scaleY = CGFloat(image.height) / CGFloat(mask.height)
-        let scale = (scaleX + scaleY) / 2
 
-        let paddedRadius = radius * scale * (1 + paddingRatio)
-        let centerInImage = CGPoint(x: center.x * scaleX, y: center.y * scaleY)
+        let (center, radius) = try boundingCircle(of: mask, scaleX: scaleX, scaleY: scaleY)
 
         return try makeCircularCrop(
             from: image,
-            center: centerInImage,
-            radius: paddedRadius
+            center: center,
+            radius: radius * (1 + paddingRatio)
         )
     }
 
@@ -65,8 +74,13 @@ nonisolated enum DishCropper {
     /// (persentil jarak, bukan jarak maksimum) dari pixel foreground mask,
     /// sehingga lingkaran yang dihasilkan mengikuti mayoritas bentuk bulat
     /// meskipun ada bagian lain yang ikut tersegmentasi secara tidak akurat.
+    /// - Parameters scaleX/scaleY: mask pixels to original-image pixels, per
+    ///   axis. Applied while collecting, so the centre and every distance below
+    ///   are already in the space where the dish is actually round.
     private static func boundingCircle(
-        of mask: CGImage
+        of mask: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
     ) throws -> (center: CGPoint, radius: CGFloat) {
         let width = mask.width
         let height = mask.height
@@ -77,8 +91,9 @@ nonisolated enum DishCropper {
         }
         let bytesPerRow = mask.bytesPerRow
 
-        var xs: [Int] = []
-        var ys: [Int] = []
+        // Mapped to original-image pixels as they are collected -- see crop().
+        var xs: [Double] = []
+        var ys: [Double] = []
         xs.reserveCapacity(width * height / 4)
         ys.reserveCapacity(width * height / 4)
 
@@ -86,8 +101,8 @@ nonisolated enum DishCropper {
             let rowStart = y * bytesPerRow
             for x in 0..<width {
                 if pointer[rowStart + x] != 0 {
-                    xs.append(x)
-                    ys.append(y)
+                    xs.append((Double(x) + 0.5) * Double(scaleX))
+                    ys.append((Double(y) + 0.5) * Double(scaleY))
                 }
             }
         }
@@ -106,8 +121,8 @@ nonisolated enum DishCropper {
         var distances: [Double] = []
         distances.reserveCapacity(xs.count)
         for index in xs.indices {
-            let dx = Double(xs[index]) - centerX
-            let dy = Double(ys[index]) - centerY
+            let dx = xs[index] - centerX
+            let dy = ys[index] - centerY
             distances.append((dx * dx + dy * dy).squareRoot())
         }
         distances.sort()
@@ -124,13 +139,13 @@ nonisolated enum DishCropper {
         return (center, radius)
     }
 
-    private static func median(of values: [Int]) -> Double {
+    private static func median(of values: [Double]) -> Double {
         let sorted = values.sorted()
         let count = sorted.count
         if count % 2 == 0 {
-            return Double(sorted[count / 2 - 1] + sorted[count / 2]) / 2
+            return (sorted[count / 2 - 1] + sorted[count / 2]) / 2
         } else {
-            return Double(sorted[count / 2])
+            return sorted[count / 2]
         }
     }
 

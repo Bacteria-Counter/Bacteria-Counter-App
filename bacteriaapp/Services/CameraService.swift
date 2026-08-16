@@ -362,15 +362,41 @@ final class CameraService: NSObject, ObservableObject {
         return settings
     }
 
+    /// Long side beyond which extra pixels are thrown away before any model sees
+    /// them, so capturing them only costs time.
+    ///
+    /// 4480 is the largest input the counting pipeline consumes -- sam_micro's
+    /// high-resolution second pass -- and the dish is cropped out of the frame
+    /// before that, so the frame needs to be somewhat larger than the crop it
+    /// has to yield. 6000 leaves that headroom with room to spare on a plate
+    /// photographed loosely.
+    ///
+    /// The cost of ignoring this is not small. Measured on the same plate,
+    /// through the whole pipeline: a 12 MP frame counts in 1.8 s, a 48 MP frame
+    /// in 20.0 s, for the same colonies. Every stage that runs at the frame's
+    /// own resolution pays it, and the mask post-processing pays it once per
+    /// colony found.
+    private static let workingLongSide: Int32 = 6000
+
     private static func maximumPhotoDimensions(
         for format: AVCaptureDevice.Format
     ) -> CMVideoDimensions? {
-        format.supportedMaxPhotoDimensions
+        let supported = format.supportedMaxPhotoDimensions
             .filter { $0.width > 0 && $0.height > 0 }
-            .max {
-                Int64($0.width) * Int64($0.height)
-                    < Int64($1.width) * Int64($1.height)
-            }
+        guard !supported.isEmpty else { return nil }
+
+        let area: (CMVideoDimensions) -> Int64 = { Int64($0.width) * Int64($0.height) }
+        // Largest option that stays under the ceiling. Chosen from the format's
+        // OWN list rather than computed: capturePhoto traps unless the requested
+        // dimensions are one of the values the current format supports.
+        if let best = supported
+            .filter({ max($0.width, $0.height) <= workingLongSide })
+            .max(by: { area($0) < area($1) }) {
+            return best
+        }
+        // Every option is above the ceiling -- take the smallest rather than the
+        // largest, since the extra pixels are the thing being avoided.
+        return supported.min(by: { area($0) < area($1) })
     }
 
     private static func captureSettings(
