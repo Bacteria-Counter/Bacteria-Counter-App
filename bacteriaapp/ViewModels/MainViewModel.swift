@@ -237,7 +237,7 @@ final class MainViewModel: ObservableObject {
             defer { progressTask.cancel() }
 
             do {
-                let prepared = try await prepareIfNeeded(photo)
+                let prepared = try await prepareIfNeeded(photo, for: model)
                 guard !Task.isCancelled else { return }
 
                 if usedFullFrame, model.engine == .labYOLO {
@@ -269,18 +269,27 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    /// Segment the dish and crop to it, once per photo.
+    /// The image this model counts on, cached per photo.
     ///
-    /// On failure the AgarScope models carry on with the full frame. That is not
-    /// a degraded guess: it is exactly how they ran before the crop was
-    /// introduced, and their accuracy there is measured. Refusing outright would
-    /// block a technician over a photo those models can still count.
-    private func prepareIfNeeded(_ photo: NSImage) async throws -> CGImage {
-        if let cached = preparedCGImage { return cached }
-
+    /// FastSAM takes the photo whole -- no segmentation, no crop -- which is the
+    /// path it ran on before the merge and the one every figure for it was
+    /// measured against. Everything else gets the dish cropped out first, and if
+    /// segmentation cannot find a dish the AgarScope models carry on with the
+    /// full frame while the lab models refuse, since they were trained on crops.
+    ///
+    /// Whatever is returned is also what the viewport shows, so the boxes always
+    /// sit on the picture the model actually looked at.
+    private func prepareIfNeeded(_ photo: NSImage, for model: ModelChoice) async throws -> CGImage {
         guard let full = Self.cgImage(from: photo) else {
             throw PreparationError.imageUnreadable
         }
+
+        guard model.usesCrop else {
+            usedFullFrame = false
+            return show(Self.capped(full))
+        }
+
+        if let cached = preparedCGImage { return show(cached) }
 
         analysisStage = "Mencari cawan"
         let tSeg = Date()
@@ -290,8 +299,7 @@ final class MainViewModel: ObservableObject {
 
         // Cropping draws a canvas the size of the dish, and on a big capture
         // that is tens of megapixels of work. Off the main actor so the window
-        // keeps repainting: the analysis genuinely takes seconds on a big photo,
-        // and a frozen UI makes seconds look like a hang.
+        // keeps repainting.
         analysisStage = "Memotong cawan"
         let tCrop = Date()
         let (prepared, fellBack) = await Task.detached(priority: .userInitiated) {
@@ -304,10 +312,15 @@ final class MainViewModel: ObservableObject {
                  extra: fellBack ? "foto utuh" : "\(prepared.width)x\(prepared.height)")
 
         preparedCGImage = prepared
-        preparedImage = NSImage(cgImage: prepared,
-                                size: NSSize(width: prepared.width, height: prepared.height))
         usedFullFrame = fellBack
-        return prepared
+        return show(prepared)
+    }
+
+    @discardableResult
+    private func show(_ image: CGImage) -> CGImage {
+        preparedImage = NSImage(cgImage: image,
+                                size: NSSize(width: image.width, height: image.height))
+        return image
     }
 
     /// The largest input any model here consumes is 4480 -- sam_micro's

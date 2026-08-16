@@ -55,6 +55,26 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     /// is a property of the method, not a gap in the implementation.
     var producesBoxes: Bool { self != .csrnet }
 
+    /// Whether the dish is segmented and cropped before this model runs.
+    ///
+    /// FastSAM does not. It gets the whole photo, which is how it ran before the
+    /// two pipelines were merged and how every figure measured for it was
+    /// produced. The crop was added because it improved FastSAM on the PCA
+    /// benchmark, but in the app it did not survive contact with real captures:
+    /// counting stalled on plate after plate. Rather than keep tuning a change
+    /// that was worth about half a colony of accuracy, FastSAM goes back to the
+    /// path that works, and skipping segmentation takes several seconds off its
+    /// run as well.
+    ///
+    /// The lab YOLO models are not optional here -- they were trained on cropped
+    /// plates and lose 5 to 19 MAE without the crop.
+    var usesCrop: Bool {
+        switch self {
+        case .samMicro: false
+        case .mac1, .csrnet, .v11s, .v26s: true
+        }
+    }
+
     var displayName: String {
         switch self {
         case .samMicro: "FastSAM"
