@@ -202,6 +202,17 @@ final class CameraService: NSObject, ObservableObject {
             !isContinuityCameraCandidate($0) && $0.deviceType == .builtInWideAngleCamera
         })
 
+        // Printed so a camera that is labelled wrongly can be read off the
+        // system's own answers. isContinuityCamera and deviceType come from
+        // AVFoundation; the name match is this app's own fallback and is the
+        // part most likely to misfire, since a Mac named after its owner
+        // produces a built-in camera called "<Owner> Camera".
+        for d in discovery.devices {
+            print("[AgarScope] kamera: \"\(d.localizedName)\" | tipe \(d.deviceType.rawValue) "
+                  + "| isContinuityCamera \(d.isContinuityCamera) "
+                  + "| dianggap iPhone: \(isContinuityCameraCandidate(d))")
+        }
+
         return [
             iPhone.map { CameraCandidate(device: $0, type: "Continuity Camera", isContinuityCamera: true) },
             builtIn.map { CameraCandidate(device: $0, type: "Mac built-in camera", isContinuityCamera: false) }
