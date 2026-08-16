@@ -362,21 +362,14 @@ final class CameraService: NSObject, ObservableObject {
         return settings
     }
 
-    /// Long side beyond which extra pixels are thrown away before any model sees
-    /// them, so capturing them only costs time.
+    /// The smallest square frame worth capturing, in pixels.
     ///
-    /// 4480 is the largest input the counting pipeline consumes -- sam_micro's
-    /// high-resolution second pass -- and the dish is cropped out of the frame
-    /// before that, so the frame needs to be somewhat larger than the crop it
-    /// has to yield. 6000 leaves that headroom with room to spare on a plate
-    /// photographed loosely.
-    ///
-    /// The cost of ignoring this is not small. Measured on the same plate,
-    /// through the whole pipeline: a 12 MP frame counts in 1.8 s, a 48 MP frame
-    /// in 20.0 s, for the same colonies. Every stage that runs at the frame's
-    /// own resolution pays it, and the mask post-processing pays it once per
-    /// colony found.
-    private static let workingLongSide: Int32 = 6000
+    /// Every camera frame is squared before counting, so what matters is the
+    /// SHORT side: that becomes the side of the square the dish sits in. The
+    /// dish crops in the benchmark run 1693 to 1863 pixels across, and the
+    /// pipeline consumes up to 4480, so 2400 leaves headroom above the former
+    /// without chasing the latter.
+    private static let minimumSquareSide: Int32 = 2400
 
     private static func maximumPhotoDimensions(
         for format: AVCaptureDevice.Format
@@ -386,17 +379,39 @@ final class CameraService: NSObject, ObservableObject {
         guard !supported.isEmpty else { return nil }
 
         let area: (CMVideoDimensions) -> Int64 = { Int64($0.width) * Int64($0.height) }
-        // Largest option that stays under the ceiling. Chosen from the format's
-        // OWN list rather than computed: capturePhoto traps unless the requested
-        // dimensions are one of the values the current format supports.
+        let shortSide: (CMVideoDimensions) -> Int32 = { min($0.width, $0.height) }
+
+        // The smallest option that still gives a usable square. Smallest, not
+        // largest, because pixels beyond what the pipeline consumes cost time
+        // and nothing else -- but the floor comes first, since a capture too
+        // small to resolve colonies cannot be recovered later.
+        //
+        // An earlier version of this chose the largest option under a ceiling on
+        // the LONG side, which reads sensibly and behaves badly: on a phone
+        // offering 1920x1080 and 8064x6048 and nothing between, the ceiling
+        // excluded the large option and the app captured at 2 MP. Selecting on
+        // the short side against a floor cannot fail that way.
         if let best = supported
-            .filter({ max($0.width, $0.height) <= workingLongSide })
-            .max(by: { area($0) < area($1) }) {
+            .filter({ shortSide($0) >= minimumSquareSide })
+            .min(by: { area($0) < area($1) }) {
+            Self.logChoice(supported, best)
             return best
         }
-        // Every option is above the ceiling -- take the smallest rather than the
-        // largest, since the extra pixels are the thing being avoided.
-        return supported.min(by: { area($0) < area($1) })
+
+        // Nothing reaches the floor: take the largest there is.
+        let best = supported.max(by: { area($0) < area($1) })
+        if let best { Self.logChoice(supported, best) }
+        return best
+    }
+
+    /// Printed once per session so a capture that comes out unexpectedly small
+    /// can be read off the camera's own list rather than guessed at.
+    private static func logChoice(_ supported: [CMVideoDimensions], _ chosen: CMVideoDimensions) {
+        let all = supported
+            .sorted { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) }
+            .map { "\($0.width)x\($0.height)" }
+            .joined(separator: ", ")
+        print("[AgarScope] format menawarkan: \(all) | dipilih: \(chosen.width)x\(chosen.height)")
     }
 
     private static func captureSettings(
