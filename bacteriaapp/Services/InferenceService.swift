@@ -1,18 +1,25 @@
 import AgarScopeKit
 import AppKit
+import CoreGraphics
 import Foundation
 
-/// Runs the colony-counting pipelines on this machine, through AgarScopeKit.
+/// Runs a counting model on an already-cropped dish image.
 ///
-/// This used to POST the photo to a local Python server on port 8721, which had
-/// to be started by hand before the app was any use. Everything it did now runs
-/// in-process through Core ML: same models, same preprocessing, same filters,
-/// verified plate for plate against the Python path before the change (see
-/// AgarScopeKit/README.md). Server/server.py is still in the repo, but the app
-/// no longer needs it running.
+/// Cropping happens before this, once per photo, and is shared by every model
+/// (see MainViewModel). What is left here is the part that genuinely differs
+/// between the two codebases and cannot be shared, because each model was
+/// trained against its own version of it:
 ///
-/// Two of the server's twelve options did not come across, and their absence is
-/// deliberate rather than pending -- see AgarScope.Model.
+///   AgarScope models  CLAHE on the L channel with colour kept, input size
+///                     chosen per photo between 1280 and 3200, and a second
+///                     pass at 4480 when the colonies are pinpoint.
+///   Lab YOLO models   grayscale, then CLAHE in 8x8 tiles, then a stretch to
+///                     the size baked into the Core ML export -- 1024 for
+///                     v11s and v26n, 1280 for v26s.
+///
+/// Feeding either model the other's preprocessing was measured and it costs
+/// real accuracy, so these stay separate on purpose rather than for want of
+/// tidying.
 struct InferenceService {
     enum InferenceError: LocalizedError {
         case modelsMissing(String)
@@ -37,10 +44,21 @@ struct InferenceService {
     /// the quantised set was measured against the float one.
     var modelDirectory: URL? = AgarScope.defaultModelDirectory()
 
-    func analyze(image: NSImage, model: ModelChoice) async throws -> AnalysisResult {
-        guard let cgImage = Self.cgImage(from: image) else {
-            throw InferenceError.invalidImage
+    private let clahePreprocessor = CLAHEGrayscalePreprocessor()
+    private let yoloDetector = YOLODetector()
+
+    func analyze(image: CGImage, model: ModelChoice,
+                 usedFullFrame: Bool) async throws -> AnalysisResult {
+        switch model.engine {
+        case .agarScope: try await runAgarScope(image, model, usedFullFrame)
+        case .labYOLO: try await runLabYOLO(image, model, usedFullFrame)
         }
+    }
+
+    // MARK: - AgarScope
+
+    private func runAgarScope(_ image: CGImage, _ model: ModelChoice,
+                              _ usedFullFrame: Bool) async throws -> AnalysisResult {
         guard let dir = modelDirectory else {
             throw InferenceError.modelsMissing("(bundel aplikasi)")
         }
@@ -53,7 +71,7 @@ struct InferenceService {
         let output: AgarScope.Output
         do {
             output = try await Task.detached(priority: .userInitiated) {
-                try AgarScope.analyze(image: cgImage, model: engineModel, modelDirectory: dir)
+                try AgarScope.analyze(image: image, model: engineModel, modelDirectory: dir)
             }.value
         } catch let error as AgarScope.AnalyzeError {
             if case .modelsNotFound(let path) = error { throw InferenceError.modelsMissing(path) }
@@ -67,26 +85,51 @@ struct InferenceService {
             averageConfidence: Int(output.averageConfidence.rounded()),
             modelUsed: model,
             detections: output.detections.map {
-                ColonyDetection(cx: $0.cx, cy: $0.cy, radius: $0.radius)
+                ColonyDetection(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
             },
             imageWidth: output.imageWidth,
             imageHeight: output.imageHeight,
-            heatmapImage: output.heatmapPNG.flatMap { NSImage(data: $0) }
+            heatmapImage: output.heatmapPNG.flatMap { NSImage(data: $0) },
+            usedFullFrame: usedFullFrame
         )
     }
 
-    /// Turn the count into a reportable CFU figure. Was POST /calculate-cfu;
-    /// the rules themselves are ported in AgarScopeKit's CFU.
-    func calculateCFU(plates: [CFU.Plate], dishAreaCm2: Double = CFU.defaultDishAreaCm2,
-                      method: String = "pour", unit: String = "CFU/ml") throws -> CFU.Result {
-        try CFU.calculate(plates, dishAreaCm2: dishAreaCm2, method: method, unit: unit)
-    }
+    // MARK: - Lab YOLO
 
-    private static func cgImage(from image: NSImage) -> CGImage? {
-        // Straight from the NSImage, with no JPEG round trip. The old path had
-        // to encode to JPEG to put the photo in an HTTP body, and that cost a
-        // measured 1-4 units per pixel; nothing needs to pay it now.
-        var rect = CGRect(origin: .zero, size: image.size)
-        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    private func runLabYOLO(_ image: CGImage, _ model: ModelChoice,
+                            _ usedFullFrame: Bool) async throws -> AnalysisResult {
+        guard let variant = YOLOModelVariant(rawValue: model.rawValue) else {
+            throw InferenceError.failed("Varian \(model.rawValue) tidak dikenal.")
+        }
+
+        let boxes: [BoundingBox]
+        do {
+            let prepared = try clahePreprocessor.preprocess(image)
+            boxes = try await yoloDetector.detect(in: prepared, variant: variant)
+        } catch {
+            throw InferenceError.failed(error.localizedDescription)
+        }
+
+        // The grayscale pass leaves the image the same size, so a box measured
+        // against it lands on the colour crop unchanged -- which is what gets
+        // displayed, so every model is judged against the same picture.
+        let size = CGSize(width: image.width, height: image.height)
+        let confidences = boxes.map { Double($0.confidence) }
+        let meanConfidence = confidences.isEmpty
+            ? 0 : confidences.reduce(0, +) / Double(confidences.count) * 100
+
+        return AnalysisResult(
+            totalColonies: boxes.count,
+            averageConfidence: Int(meanConfidence.rounded()),
+            modelUsed: model,
+            detections: boxes.map {
+                let r = $0.rect(in: size)
+                return ColonyDetection(x: r.minX, y: r.minY, width: r.width, height: r.height)
+            },
+            imageWidth: size.width,
+            imageHeight: size.height,
+            heatmapImage: nil,
+            usedFullFrame: usedFullFrame
+        )
     }
 }

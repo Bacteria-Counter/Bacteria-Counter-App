@@ -16,6 +16,10 @@ struct SidebarView: View {
 
                 SidebarSection(title: "MODEL") {
                     VStack(alignment: .leading, spacing: 6) {
+                        // One flat list of all six. Which codebase a model came
+                        // from is not a question about plates, and the one
+                        // preprocessing step a technician could reasonably care
+                        // about -- the dish crop -- is shared by all of them.
                         Picker("Model", selection: Binding(
                             get: { viewModel.selectedModel },
                             set: { viewModel.selectModel($0) }
@@ -34,6 +38,19 @@ struct SidebarView: View {
                                 .foregroundStyle(AppTheme.accentOrange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                    }
+                }
+
+                // Shown only when segmentation failed, because that changes what
+                // the numbers mean: the AgarScope models are counting the whole
+                // photo, and the lab models cannot run at all.
+                if viewModel.usedFullFrame {
+                    SidebarSection(title: "CAWAN") {
+                        Text("Cawan tidak terdeteksi. SAM, Mac1, dan CSRNet menghitung dari foto utuh; model lab butuh potongan cawan dan tidak bisa dipakai pada foto ini.")
+                            .font(AppTheme.monoSmall)
+                            .foregroundStyle(AppTheme.accentOrange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
@@ -57,26 +74,15 @@ struct SidebarView: View {
                         )
                     }
                 }
-                
+
                 if viewModel.showColonyCount {
-                    VStack(spacing: 16) {
-                        ColonyCountPanel(
-                            count: viewModel.colonyCount,
-                            isAnalyzing: viewModel.appState == .analyzing,
-                            progress: viewModel.analysisProgress,
-                            isComplete: viewModel.appState == .complete
-                        )
-
-//                        if viewModel.appState == .complete {
-//                            SecondaryButton(
-//                                title: "Export Report",
-//                                icon: "square.and.arrow.down",
-//                                action: viewModel.exportReport
-//                            )
-//                        }
-                    }
+                    ColonyCountPanel(
+                        count: viewModel.colonyCount,
+                        isAnalyzing: viewModel.appState == .analyzing,
+                        progress: viewModel.analysisProgress,
+                        isComplete: viewModel.appState == .complete
+                    )
                 }
-
             }
             .padding(.horizontal, 20)
             .padding(.top, 24)

@@ -1,16 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// The captured plate with its detection circles, zoomable and pannable.
+/// The cropped plate with its detection boxes, zoomable and pannable.
 ///
 /// Zoom exists for a specific reason: the models that matter most here find
 /// pinpoint colonies barely a pixel or two across on a 3200px photo, and at
 /// fit-to-window there is no way for a microbiologist to judge whether a green
-/// circle is sitting on a real colony or on a speck of agar. Being able to
-/// check that by eye is the whole point.
+/// box is sitting on a real colony or on a speck of agar. Being able to check
+/// that by eye is the whole point.
 ///
-/// The image and the circles are scaled TOGETHER, as one composed view, rather
-/// than each being scaled by its own factor. That is deliberate: a circle that
+/// The image and the boxes are scaled TOGETHER, as one composed view, rather
+/// than each being scaled by its own factor. That is deliberate: a box that
 /// drifts off its colony under magnification would be worse than no zoom at
 /// all, because it would look like a detection error rather than a drawing
 /// one. Composing first makes that drift impossible to introduce.
@@ -83,15 +83,18 @@ struct CapturedImageView: View {
                 let offsetY = (viewport.height - source.height * fit) / 2
 
                 ForEach(Array(detections.enumerated()), id: \.offset) { _, detection in
-                    let diameter = detection.radius * 2 * fit
-                    Circle()
+                    let w = detection.width * fit
+                    let h = detection.height * fit
+                    Rectangle()
                         // Divided by the zoom so the outline stays a hairline
                         // on screen. At 12x a fixed 2pt stroke becomes 24pt and
                         // swallows the very colonies the zoom was for.
                         .stroke(AppTheme.accentGreen, lineWidth: 2 / z)
-                        .frame(width: diameter, height: diameter)
-                        .position(x: detection.cx * fit + offsetX,
-                                  y: detection.cy * fit + offsetY)
+                        .frame(width: w, height: h)
+                        // .position takes a centre, and the detection carries a
+                        // top-left corner.
+                        .position(x: (detection.x + detection.width / 2) * fit + offsetX,
+                                  y: (detection.y + detection.height / 2) * fit + offsetY)
                 }
             }
         }

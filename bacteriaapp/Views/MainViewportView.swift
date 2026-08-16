@@ -18,17 +18,22 @@ struct MainViewportView: View {
 
     @ViewBuilder
     private var cameraContent: some View {
-        if let image = viewModel.capturedImage {
-            // CSRNet has no discrete per-colony boxes -- when its density
-            // heatmap comes back, show that instead of the raw photo +
-            // circle overlay (which would just be empty circles anyway).
+        // Every model is shown against the same picture -- the dish crop -- so
+        // switching models changes the boxes and nothing else. Giving each
+        // pipeline its own preprocessed image instead would make two models look
+        // different for a reason that has nothing to do with the counting.
+        if let plate = viewModel.preparedImage ?? viewModel.capturedImage {
+            // CSRNet has no per-colony positions, so there are no boxes to draw;
+            // its density heatmap goes here instead. That is the method's limit,
+            // not a missing feature.
             if viewModel.appState == .complete,
                let heatmap = viewModel.analysisResult?.heatmapImage {
-                CapturedImageView(image: heatmap, detections: [], detectionImageSize: nil)
+                CapturedImageView(image: heatmap)
             } else {
                 CapturedImageView(
-                    image: image,
-                    detections: viewModel.appState == .complete ? (viewModel.analysisResult?.detections ?? []) : [],
+                    image: plate,
+                    detections: viewModel.appState == .complete
+                        ? (viewModel.analysisResult?.detections ?? []) : [],
                     detectionImageSize: viewModel.analysisResult.map {
                         CGSize(width: $0.imageWidth, height: $0.imageHeight)
                     }

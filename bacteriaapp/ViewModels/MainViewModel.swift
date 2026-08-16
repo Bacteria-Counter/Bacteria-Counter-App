@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,13 +17,30 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisResult: AnalysisResult?
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
-    // Defaults to the counter rather than the sterility check: counting is
-    // what the app is opened for, and SAM is the most accurate option on
-    // bright plates by a wide margin (MAE 5.4 against Mac1's 8.3).
-    @Published var selectedModel: ModelChoice = .samMicro
+    @Published private(set) var selectedModel: ModelChoice = .samMicro
+
+    /// The dish crop every model is measured against, and what the viewport
+    /// shows. Cropping is done once per photo and shared: it is the one
+    /// preprocessing step both pipelines agree on, and running it per model
+    /// would put the 84 MB segmentation model through six passes for one plate.
+    @Published private(set) var preparedImage: NSImage?
+    /// Set when segmentation could not find a dish and the AgarScope models are
+    /// working from the uncropped photo instead. The lab YOLO models were
+    /// trained on cropped plates and have no equivalent fallback, so they refuse.
+    @Published private(set) var usedFullFrame = false
 
     let cameraService = CameraService()
     private let inferenceService = InferenceService()
+    private let segmenter = PetriDishSegmenter()
+
+    private var preparedCGImage: CGImage?
+    private var analysisTask: Task<Void, Never>?
+
+    init() {
+        cameraService.onConnectionLost = { [weak self] in
+            self?.handleCameraConnectionLost()
+        }
+    }
 
     var showColonyCount: Bool {
         appState == .analyzing || appState == .complete
@@ -38,7 +56,9 @@ final class MainViewModel: ObservableObject {
             return "Analyzing · \(Int(analysisProgress * 100))% · \(colonyCount) colonies detected"
         case .complete:
             guard let result = analysisResult else { return "Complete" }
-            return "Complete · \(result.totalColonies) colonies · avg conf \(result.averageConfidence)% · \(result.modelUsed.fullDisplayName) model"
+            let base = "Complete · \(result.totalColonies) colonies · avg conf "
+                + "\(result.averageConfidence)% · \(result.modelUsed.fullDisplayName)"
+            return result.usedFullFrame ? base + " · cawan tidak terdeteksi, foto utuh dipakai" : base
         }
     }
 
@@ -49,8 +69,6 @@ final class MainViewModel: ObservableObject {
     var isDeviceConnected: Bool {
         deviceName != nil
     }
-
-    private var analysisTask: Task<Void, Never>?
 
     func connectDevice() {
         guard appState == .disconnected else { return }
@@ -86,37 +104,21 @@ final class MainViewModel: ObservableObject {
             do {
                 let image = try await cameraService.capturePhoto()
                 capturedImage = image
-                startAnalysis()
+                startAnalysis(freshPhoto: true)
             } catch {
-                connectionError = error.localizedDescription
+                // A capture that fails because the iPhone went away is the
+                // disconnect case, not an analysis error -- it has to reset the
+                // UI rather than leave a message next to a dead preview.
+                if case CameraService.CameraError.notConnected = error {
+                    handleCameraConnectionLost()
+                } else {
+                    connectionError = error.localizedDescription
+                }
             }
         }
     }
 
-    /// Called by the sidebar model picker. Switching models after a plate
-    /// has already been analyzed re-runs analysis on the SAME image with the
-    /// new model — otherwise the displayed count/label would silently stay
-    /// from whichever model ran last, which reads as "the picker doesn't do
-    /// anything."
-    func selectModel(_ model: ModelChoice) {
-        guard selectedModel != model else { return }
-        selectedModel = model
-        if capturedImage != nil, appState != .analyzing {
-            startAnalysis()
-        }
-    }
-
-    func newCapture() {
-        analysisTask?.cancel()
-        analysisTask = nil
-        capturedImage = nil
-        colonyCount = 0
-        analysisProgress = 0
-        analysisResult = nil
-        appState = isDeviceConnected ? .connected : .disconnected
-    }
-
-    /// Lets the user analyze a plate photo from disk instead of the camera —
+    /// Lets the user analyze a plate photo from disk instead of the camera --
     /// works regardless of whether a camera is connected.
     func uploadImage() {
         guard appState != .analyzing else { return }
@@ -137,22 +139,85 @@ final class MainViewModel: ObservableObject {
         }
 
         capturedImage = image
-        startAnalysis()
+        startAnalysis(freshPhoto: true)
     }
 
-    private func startAnalysis() {
-        guard let image = capturedImage else { return }
+    /// Called by the sidebar picker. Switching models after a plate has been
+    /// analyzed re-runs on the SAME crop with the new model -- otherwise the
+    /// displayed count would silently stay from whichever model ran last, which
+    /// reads as "the picker doesn't do anything". The crop is not redone: it
+    /// does not depend on the model, and redoing it would make two models
+    /// disagree for a reason that has nothing to do with either.
+    func selectModel(_ model: ModelChoice) {
+        guard selectedModel != model else { return }
+        selectedModel = model
+        if capturedImage != nil, appState != .analyzing {
+            startAnalysis(freshPhoto: false)
+        }
+    }
 
-        appState = .analyzing
+    func newCapture() {
+        analysisTask?.cancel()
+        analysisTask = nil
+        clearAnalysis()
+        capturedImage = nil
+        appState = isDeviceConnected ? .connected : .disconnected
+    }
+
+    /// Everything derived from a photo. Both the crop and the result have to go:
+    /// leaving the crop behind would silently analyze the previous plate, and
+    /// leaving the result behind would draw the previous plate's boxes over the
+    /// new one.
+    private func clearAnalysis() {
+        preparedImage = nil
+        preparedCGImage = nil
+        usedFullFrame = false
         colonyCount = 0
         analysisProgress = 0
+        analysisResult = nil
+    }
+
+    private func handleCameraConnectionLost() {
+        analysisTask?.cancel()
+        analysisTask = nil
+
+        isConnecting = false
+        isCapturing = false
+        connectionError = nil
+
+        deviceName = nil
+        deviceType = nil
+        captureSettings = .unavailable
+
+        capturedImage = nil
+        clearAnalysis()
+        appState = .disconnected
+    }
+
+    private func startAnalysis(freshPhoto: Bool) {
+        guard let photo = capturedImage else { return }
+
+        analysisTask?.cancel()
+        appState = .analyzing
+        // Cleared here rather than only at capture time, so switching from a
+        // lab model that refused an uncropped photo to one that can count it
+        // does not leave the refusal on screen next to a fresh result.
+        connectionError = nil
+        colonyCount = 0
+        analysisProgress = 0
+        analysisResult = nil
+        if freshPhoto {
+            preparedImage = nil
+            preparedCGImage = nil
+            usedFullFrame = false
+        }
 
         let model = selectedModel
 
         analysisTask = Task {
-            // Indeterminate progress while inference runs. The pipeline has
-            // no meaningful intermediate percentage to report — it is one
-            // Core ML pass plus filtering — so this is visual feedback, not
+            // Indeterminate progress while the pipeline runs. There is no
+            // meaningful intermediate percentage to report -- it is a crop plus
+            // one Core ML pass plus filtering -- so this is visual feedback, not
             // a measurement of how far along it is.
             let progressTask = Task {
                 while !Task.isCancelled && analysisProgress < 0.9 {
@@ -160,10 +225,19 @@ final class MainViewModel: ObservableObject {
                     try? await Task.sleep(for: .milliseconds(120))
                 }
             }
+            defer { progressTask.cancel() }
 
             do {
-                let result = try await inferenceService.analyze(image: image, model: model)
-                progressTask.cancel()
+                let prepared = try await prepareIfNeeded(photo)
+                guard !Task.isCancelled else { return }
+
+                if usedFullFrame, model.engine == .labYOLO {
+                    throw PreparationError.cropRequired
+                }
+
+                let result = try await inferenceService.analyze(
+                    image: prepared, model: model, usedFullFrame: usedFullFrame
+                )
                 guard !Task.isCancelled else { return }
 
                 colonyCount = result.totalColonies
@@ -171,12 +245,66 @@ final class MainViewModel: ObservableObject {
                 analysisResult = result
                 appState = .complete
             } catch {
-                progressTask.cancel()
                 guard !Task.isCancelled else { return }
                 connectionError = error.localizedDescription
+                analysisProgress = 0
                 appState = isDeviceConnected ? .connected : .disconnected
             }
         }
+    }
+
+    /// Segment the dish and crop to it, once per photo.
+    ///
+    /// On failure the AgarScope models carry on with the full frame. That is not
+    /// a degraded guess: it is exactly how they ran before the crop was
+    /// introduced, and their accuracy there is measured. Refusing outright would
+    /// block a technician over a photo those models can still count.
+    private func prepareIfNeeded(_ photo: NSImage) async throws -> CGImage {
+        if let cached = preparedCGImage { return cached }
+
+        guard let full = Self.cgImage(from: photo) else {
+            throw PreparationError.imageUnreadable
+        }
+
+        var prepared = full
+        var fellBack = false
+        do {
+            let mask = try await segmenter.makeMask(from: full)
+            prepared = try DishCropper.crop(image: full, mask: mask.mask).image
+        } catch {
+            prepared = full
+            fellBack = true
+        }
+
+        preparedCGImage = prepared
+        preparedImage = NSImage(cgImage: prepared,
+                                size: NSSize(width: prepared.width, height: prepared.height))
+        usedFullFrame = fellBack
+        return prepared
+    }
+
+    private enum PreparationError: LocalizedError {
+        case imageUnreadable
+        case cropRequired
+
+        var errorDescription: String? {
+            switch self {
+            case .imageUnreadable:
+                "Foto tidak bisa dibaca."
+            case .cropRequired:
+                "Cawan tidak terdeteksi di foto ini. Model lab (YOLOv11s, YOLOv26s, YOLOv26n) "
+                    + "dilatih memakai gambar yang sudah dipotong dan tidak bisa dipakai tanpa "
+                    + "potongan itu. Pilih SAM, Mac1, atau CSRNet, atau ambil ulang fotonya."
+            }
+        }
+    }
+
+    private static func cgImage(from image: NSImage) -> CGImage? {
+        // Straight from the NSImage, with no JPEG round trip. The old server
+        // path had to encode to JPEG to put the photo in an HTTP body, and that
+        // cost a measured 1-4 units per pixel; nothing needs to pay it now.
+        var rect = CGRect(origin: .zero, size: image.size)
+        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 
     func exportReport() {

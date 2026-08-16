@@ -44,10 +44,19 @@ public enum AgarScope {
         var isSAM: Bool { self == .samMicro }
     }
 
-    /// One colony, in the ORIGINAL photo's pixel space. The overlay view scales
-    /// these; nothing here knows how the image is displayed.
+    /// One colony as an axis-aligned box, in the ORIGINAL photo's pixel space.
+    /// The overlay view scales these; nothing here knows how the image is
+    /// displayed.
+    ///
+    /// A box rather than a circle, at the lab's request: colonies are not
+    /// reliably round, and a circle drawn over an irregular or merged colony
+    /// either clips it or claims agar that is not part of it. It is also closer
+    /// to the raw truth on both paths -- YOLO detects boxes and this used to
+    /// inflate them to a circle of max(w, h) / 2, while FastSAM produces a mask
+    /// whose extent a box states directly.
     public struct Detection: Sendable {
-        public let cx: Double, cy: Double, radius: Double
+        /// Top-left corner and size, matching the image's own pixel axes.
+        public let x: Double, y: Double, width: Double, height: Double
     }
 
     public struct Output: Sendable {
@@ -128,14 +137,21 @@ public enum AgarScope {
 
         if model.isSAM {
             let r = try Pipeline.count(image: bmp, modelDir: dir, micro: model == .samMicro)
-            // _sam_response(): the overlay circle is the minimum enclosing
-            // circle of the mask's largest contour, and confidence is the mean
-            // circularity as a percentage.
+            // The box is the extent of the mask's largest contour. Same contour
+            // _sam_response() drew its circle around, so this marks the same
+            // colony -- it just states the mask's own extent instead of the
+            // smallest circle that swallows it. Confidence is still the mean
+            // circularity as a percentage, which is unchanged: it measures the
+            // SHAPE of the mask and has nothing to do with how it is drawn.
             let detections = r.colonies.compactMap { c -> Detection? in
                 let pts = Contours.outerBoundary(c.mask, width: bmp.width, height: bmp.height)
                 guard !pts.isEmpty else { return nil }
-                let circle = Contours.minEnclosingCircle(pts)
-                return Detection(cx: circle.cx, cy: circle.cy, radius: circle.r)
+                let xs = pts.map { Double($0.0) }, ys = pts.map { Double($0.1) }
+                let x0 = xs.min()!, y0 = ys.min()!
+                // +1: min and max are both inside the colony, so a mask one
+                // pixel across spans one pixel, not zero.
+                return Detection(x: x0, y: y0,
+                                 width: xs.max()! - x0 + 1, height: ys.max()! - y0 + 1)
             }
             let conf = r.colonies.isEmpty ? 0
                 : r.colonies.reduce(0) { $0 + $1.circularity } / Double(r.colonies.count) * 100
@@ -150,8 +166,12 @@ public enum AgarScope {
         return Output(totalColonies: r.count,
                       averageConfidence: (r.confidence * 10).rounded() / 10,
                       modelUsed: model.rawValue,
+                      // The detector's own box, passed through. It used to be
+                      // inflated into a circle of max(w, h) / 2, which made a
+                      // long colony's mark cover agar on both sides of it.
                       detections: r.boxes.map {
-                          Detection(cx: $0.cx, cy: $0.cy, radius: $0.radius)
+                          Detection(x: $0.x1, y: $0.y1,
+                                    width: $0.x2 - $0.x1, height: $0.y2 - $0.y1)
                       },
                       imageWidth: w, imageHeight: h,
                       countability: CFU.assess(count: r.count), heatmapPNG: nil,
