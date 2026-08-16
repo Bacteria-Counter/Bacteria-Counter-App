@@ -118,12 +118,16 @@ enum Detect {
         }
     }
 
-    static func count(image: Bitmap, modelDir: String, key: String) throws -> Result {
+    /// `forcedSize` defaults to the adaptive rule, so no shipping caller
+    /// changes; it exists so the cross-pipeline comparison can hold input size
+    /// fixed and ask what the checkpoint alone contributes.
+    static func count(image: Bitmap, modelDir: String, key: String,
+                      forcedSize: Int? = nil) throws -> Result {
         // adaptive_imgsz() measures the dish on the ORIGINAL frame, before any
         // preprocessing -- make_lab_ab in particular discards luminance, and the
         // dish edge is a luminance edge.
         let dish = DishDetect.find(image)
-        let size = nearestSize(Pipeline.adaptiveImgsz(image, dish: dish))
+        let size = forcedSize ?? nearestSize(Pipeline.adaptiveImgsz(image, dish: dish))
         let src = preprocess(key, image)
         let lb = ImageOps.letterbox(src, targetW: size, targetH: size)
 

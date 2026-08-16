@@ -114,11 +114,17 @@ enum Pipeline {
         return kept.enumerated().filter { !flagged.contains($0.offset) }.map { $0.element }
     }
 
-    static func count(image: Bitmap, modelDir: String, micro: Bool) throws -> Result {
+    /// `skipCLAHE` and `forcedSize` exist for the cross-pipeline comparison and
+    /// both default to the shipping behaviour, so no caller in the app or the
+    /// CLI changes. skipCLAHE is for images another chain has already contrast-
+    /// equalised, where running ours on top would be a second, uncontrolled
+    /// transform; forcedSize pins the input size so the adaptive rule and the
+    /// escalation can be measured as separate effects rather than as one.
+    static func count(image: Bitmap, modelDir: String, micro: Bool,
+                      skipCLAHE: Bool = false, forcedSize: Int? = nil) throws -> Result {
         let dish = DishDetect.find(image)
-        let target = adaptiveImgsz(image, dish: dish)
-        let size = nearestSize(target)
-        let processed = clahe(image)
+        let size = forcedSize ?? nearestSize(adaptiveImgsz(image, dish: dish))
+        let processed = skipCLAHE ? image : clahe(image)
 
         func run(_ s: Int) throws -> [Colony] {
             let model = try Inference.load(dir: modelDir, name: "fastsam_\(s)")
@@ -134,7 +140,9 @@ enum Pipeline {
 
         var colonies = try run(size)
         var escalated = false
-        if micro, let d = dish, colonies.count >= escalateMinCount {
+        // A pinned size means the caller is measuring one resolution; letting
+        // escalation fire would silently put it back on two.
+        if micro, forcedSize == nil, let d = dish, colonies.count >= escalateMinCount {
             let areas = colonies.map { $0.area }.sorted()
             let median = areas[areas.count / 2]
             let pct = (median / Double.pi).squareRoot() / d.r * 100

@@ -71,11 +71,6 @@ struct InferenceService {
             },
             imageWidth: output.imageWidth,
             imageHeight: output.imageHeight,
-            countability: Countability(status: output.countability.status,
-                                       regulation: output.countability.regulation,
-                                       reliable: output.countability.reliable,
-                                       densityPerCm2: output.countability.densityPerCm2,
-                                       advisory: output.countability.advisory),
             heatmapImage: output.heatmapPNG.flatMap { NSImage(data: $0) }
         )
     }

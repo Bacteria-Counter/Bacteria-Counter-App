@@ -96,20 +96,6 @@ struct ColonyDetection: Equatable {
     let radius: Double
 }
 
-/// How far the raw count can be trusted, per the APHA 2002 counting rules
-/// (see AgarScopeKit's CFU). Only 25-250 colonies on a plate is directly
-/// reportable; outside that it's estimate-only, and past ~100 colonies/cm²
-/// it isn't estimable at all. This never changes the count itself.
-struct Countability: Equatable {
-    let status: String        // countable | below_range | above_range | tntc | no_growth
-    let regulation: Int       // which APHA regulation applies
-    let reliable: Bool
-    let densityPerCm2: Double
-    let advisory: String
-
-    var isCountable: Bool { status == "countable" }
-}
-
 struct AnalysisResult: Equatable {
     let totalColonies: Int
     let averageConfidence: Int
@@ -117,7 +103,6 @@ struct AnalysisResult: Equatable {
     let detections: [ColonyDetection]
     let imageWidth: Double
     let imageHeight: Double
-    let countability: Countability?
     /// Only set for models with no discrete per-colony locations (currently
     /// CSRNet) -- a density-map heatmap to show instead of box/circle
     /// overlays.
@@ -130,7 +115,6 @@ struct AnalysisResult: Equatable {
             && lhs.detections == rhs.detections
             && lhs.imageWidth == rhs.imageWidth
             && lhs.imageHeight == rhs.imageHeight
-            && lhs.countability == rhs.countability
             && lhs.heatmapImage === rhs.heatmapImage
     }
 }

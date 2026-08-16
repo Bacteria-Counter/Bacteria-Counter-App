@@ -42,16 +42,6 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    /// APHA 2002 advisory for the current result, if the count falls outside
-    /// the directly-reportable 25-250 range. Nil when the count is fine as-is,
-    /// so the UI only speaks up when it matters.
-    var countabilityWarning: String? {
-        guard appState == .complete,
-              let countability = analysisResult?.countability,
-              !countability.reliable else { return nil }
-        return countability.advisory
-    }
-
     var headerStatusText: String {
         deviceName ?? "No Device"
     }
