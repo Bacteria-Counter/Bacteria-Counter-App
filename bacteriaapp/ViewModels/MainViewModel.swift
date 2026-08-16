@@ -367,11 +367,22 @@ final class MainViewModel: ObservableObject {
                      Double(pixels) / 1_000_000, extra))
     }
 
+    /// The photo at its FULL pixel size.
+    ///
+    /// `NSImage.size` is in points, not pixels, and a photo carrying DPI
+    /// metadata reports far fewer points than it has pixels -- a capture from
+    /// this app arrived as 0.2 MP that way. Passing that size to
+    /// `cgImage(forProposedRect:)` does not just mislabel the image, it returns
+    /// a genuinely downscaled one, so every model has been counting colonies on
+    /// a few hundred pixels of plate. The representations know the real pixel
+    /// dimensions even when the NSImage does not, so ask them.
     private static func cgImage(from image: NSImage) -> CGImage? {
-        // Straight from the NSImage, with no JPEG round trip. The old server
-        // path had to encode to JPEG to put the photo in an HTTP body, and that
-        // cost a measured 1-4 units per pixel; nothing needs to pay it now.
-        var rect = CGRect(origin: .zero, size: image.size)
+        let pixels = image.representations.reduce(into: CGSize.zero) { size, rep in
+            size.width = max(size.width, CGFloat(rep.pixelsWide))
+            size.height = max(size.height, CGFloat(rep.pixelsHigh))
+        }
+        var rect = CGRect(origin: .zero,
+                          size: pixels.width > 0 && pixels.height > 0 ? pixels : image.size)
         return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 

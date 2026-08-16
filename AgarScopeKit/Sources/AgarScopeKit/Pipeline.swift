@@ -18,6 +18,17 @@ enum Pipeline {
     static let escalateImgsz = 4480
     static let escalateMinCount = 8
     static let escalateMaxColonyPct = 1.5
+    /// How far the escalation pass may upscale the source before it stops being
+    /// worth running.
+    ///
+    /// Escalating IS an upscale in normal use -- a 1864 px dish crop going to
+    /// 4480 is 2.4x -- and it earns its keep there, because the model gets more
+    /// pixels per colony even from interpolated ones. Past about 3x there is no
+    /// detail left to recover and the pass only costs time. A 399 px crop, which
+    /// is what a photo whose pixel size was misread produced, was escalating to
+    /// 4480 and taking 43.9 seconds to do it. Every crop in the PCA benchmark is
+    /// 1693 px or larger, so this bound leaves all of those untouched.
+    static let escalateMaxUpscale = 3.0
     // Exported Core ML sizes; adaptive_imgsz is rounded to the nearest.
     static let availableSizes = [1280, 1920, 2560, 3200, 4480]
     static let dishReference = 581.0
@@ -142,7 +153,10 @@ enum Pipeline {
         var escalated = false
         // A pinned size means the caller is measuring one resolution; letting
         // escalation fire would silently put it back on two.
-        if micro, forcedSize == nil, let d = dish, colonies.count >= escalateMinCount {
+        let worthEscalating =
+            Double(escalateImgsz) <= Double(max(image.width, image.height)) * escalateMaxUpscale
+        if micro, forcedSize == nil, worthEscalating,
+           let d = dish, colonies.count >= escalateMinCount {
             let areas = colonies.map { $0.area }.sorted()
             let median = areas[areas.count / 2]
             let pct = (median / Double.pi).squareRoot() / d.r * 100
