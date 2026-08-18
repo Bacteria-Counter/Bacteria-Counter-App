@@ -45,27 +45,6 @@ struct SidebarView: View {
                     }
                 }
 
-                SidebarSection(title: "CAPTURE") {
-                    VStack(spacing: 8) {
-                        InfoRow(label: "Resolution", value: viewModel.captureSettings.resolution)
-                        InfoRow(
-                            label: "Flash",
-                            value: viewModel.captureSettings.flash,
-                            valueColor: AppTheme.accentOrange
-                        )
-                        InfoRow(
-                            label: "Zoom",
-                            value: viewModel.captureSettings.zoom,
-                            valueColor: AppTheme.accentYellow
-                        )
-                        InfoRow(
-                            label: "Focus",
-                            value: viewModel.captureSettings.focus,
-                            valueColor: AppTheme.accentGreen
-                        )
-                    }
-                }
-
                 if viewModel.showColonyCount {
                     ColonyCountPanel(
                         count: viewModel.colonyCount,

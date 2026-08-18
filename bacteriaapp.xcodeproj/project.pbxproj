@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A6A5C0PE01000000000003 /* AgarScopeKit in Frameworks */ = {isa = PBXBuildFile; productRef = A6A5C0PE01000000000002 /* AgarScopeKit */; };
 /* End PBXBuildFile section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		12A7E1B53022DC3F00DD3FF8 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -289,7 +290,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 2R786KVV88;
+				DEVELOPMENT_TEAM = NX68XL6H25;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -338,7 +339,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 2R786KVV88;
+				DEVELOPMENT_TEAM = NX68XL6H25;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
