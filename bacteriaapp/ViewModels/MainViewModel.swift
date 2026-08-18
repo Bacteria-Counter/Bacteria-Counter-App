@@ -36,6 +36,7 @@ final class MainViewModel: ObservableObject {
     /// invents its own percentage. Each stage also prints its own duration and
     /// the pixel count it worked on, so a slow run can be reported as numbers
     /// rather than as an impression.
+    @Published private(set) var pendingCropImage: NSImage?
     @Published private(set) var analysisStage: String?
 
     let cameraService = CameraService()
@@ -71,6 +72,8 @@ final class MainViewModel: ObservableObject {
             let base = "Complete · \(result.totalColonies) colonies · avg conf "
                 + "\(result.averageConfidence)% · \(result.modelUsed.fullDisplayName)"
             return result.usedFullFrame ? base + " · cawan tidak terdeteksi, foto utuh dipakai" : base
+        case .cropping:
+            return "Sesuaikan area potong cawan"
         }
     }
 
@@ -134,7 +137,7 @@ final class MainViewModel: ObservableObject {
     /// Lets the user analyze a plate photo from disk instead of the camera --
     /// works regardless of whether a camera is connected.
     func uploadImage() {
-        guard appState != .analyzing else { return }
+        guard appState != .analyzing, appState != .cropping else { return }
         connectionError = nil
 
         let panel = NSOpenPanel()
@@ -152,16 +155,10 @@ final class MainViewModel: ObservableObject {
         }
 
         photoIsFromCamera = false
-        capturedImage = image
-        startAnalysis(freshPhoto: true)
+        pendingCropImage = image
+        appState = .cropping
     }
 
-    /// Called by the sidebar picker. Switching models after a plate has been
-    /// analyzed re-runs on the SAME crop with the new model -- otherwise the
-    /// displayed count would silently stay from whichever model ran last, which
-    /// reads as "the picker doesn't do anything". The crop is not redone: it
-    /// does not depend on the model, and redoing it would make two models
-    /// disagree for a reason that has nothing to do with either.
     func selectModel(_ model: ModelChoice) {
         guard selectedModel != model else { return }
         selectedModel = model
@@ -170,27 +167,28 @@ final class MainViewModel: ObservableObject {
         }
     }
 
+    func confirmCrop(_ cropped: NSImage) {
+        guard appState == .cropping else { return }
+        pendingCropImage = nil
+        capturedImage = cropped
+        startAnalysis(freshPhoto: true)
+    }
+
+    func cancelCrop() {
+        guard appState == .cropping else { return }
+        pendingCropImage = nil
+        appState = isDeviceConnected ? .connected : .disconnected
+    }
+
     func newCapture() {
         analysisTask?.cancel()
         analysisTask = nil
         clearAnalysis()
         capturedImage = nil
+        pendingCropImage = nil   // BARU
         appState = isDeviceConnected ? .connected : .disconnected
     }
-
-    /// Everything derived from a photo. Both the crop and the result have to go:
-    /// leaving the crop behind would silently analyze the previous plate, and
-    /// leaving the result behind would draw the previous plate's boxes over the
-    /// new one.
-    private func clearAnalysis() {
-        preparedImage = nil
-        preparedCGImage = nil
-        usedFullFrame = false
-        colonyCount = 0
-        analysisProgress = 0
-        analysisResult = nil
-    }
-
+    
     private func handleCameraConnectionLost() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -204,8 +202,18 @@ final class MainViewModel: ObservableObject {
         captureSettings = .unavailable
 
         capturedImage = nil
+        pendingCropImage = nil   // BARU
         clearAnalysis()
         appState = .disconnected
+    }
+    
+    private func clearAnalysis() {
+        preparedImage = nil
+        preparedCGImage = nil
+        usedFullFrame = false
+        colonyCount = 0
+        analysisProgress = 0
+        analysisResult = nil
     }
 
     private func startAnalysis(freshPhoto: Bool) {

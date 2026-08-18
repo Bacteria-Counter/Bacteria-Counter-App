@@ -42,6 +42,8 @@ struct ContentView: View {
             "waveform.path.ecg"
         case .complete:
             "checkmark.circle"
+        case .cropping:
+            "crop"
         }
     }
 }

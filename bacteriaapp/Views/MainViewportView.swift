@@ -18,14 +18,13 @@ struct MainViewportView: View {
 
     @ViewBuilder
     private var cameraContent: some View {
-        // Every model is shown against the same picture -- the dish crop -- so
-        // switching models changes the boxes and nothing else. Giving each
-        // pipeline its own preprocessed image instead would make two models look
-        // different for a reason that has nothing to do with the counting.
-        if let plate = viewModel.preparedImage ?? viewModel.capturedImage {
-            // CSRNet has no per-colony positions, so there are no boxes to draw;
-            // its density heatmap goes here instead. That is the method's limit,
-            // not a missing feature.
+        if viewModel.appState == .cropping, let pending = viewModel.pendingCropImage {
+            CropImageView(
+                image: pending,
+                onConfirm: { viewModel.confirmCrop($0) },
+                onCancel: { viewModel.cancelCrop() }
+            )
+        } else if let plate = viewModel.preparedImage ?? viewModel.capturedImage {
             if viewModel.appState == .complete,
                let heatmap = viewModel.analysisResult?.heatmapImage {
                 CapturedImageView(image: heatmap)
@@ -41,11 +40,6 @@ struct MainViewportView: View {
             }
         } else if viewModel.appState == .connected,
                   let session = viewModel.cameraService.previewSession {
-            // Square, because a square is what capture keeps. The preview layer
-            // fills its view by cropping the sides, so this shows exactly the
-            // frame the models will be given -- framing a plate in a 16:9
-            // preview and then storing a centre square would hide from the
-            // technician which part of their shot survives.
             CameraPreviewView(session: session)
                 .aspectRatio(1, contentMode: .fit)
         } else {

@@ -12,15 +12,6 @@ struct ResultsPanelView: View {
                 isComplete: viewModel.appState == .complete
             )
 
-//            if viewModel.appState == .complete {
-//                SecondaryButton(
-//                    title: "Export Report",
-//                    icon: "square.and.arrow.down",
-//                    action: viewModel.exportReport
-//                )
-//                .padding(.horizontal, 20)
-//                .padding(.bottom, 24)
-//            }
         }
         .frame(width: AppTheme.resultsPanelWidth)
         .background(AppTheme.sidebarBackground)

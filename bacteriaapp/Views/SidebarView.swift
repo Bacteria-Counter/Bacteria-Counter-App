@@ -108,7 +108,7 @@ struct SidebarView: View {
                         action: viewModel.capturePlate
                     )
 
-                case .analyzing, .complete:
+                case .analyzing, .complete, .cropping:
                     EmptyView()
                 }
 

@@ -6,6 +6,7 @@ enum AppState: Equatable {
     case connected
     case analyzing
     case complete
+    case cropping
 }
 
 /// Which counting model to run.
