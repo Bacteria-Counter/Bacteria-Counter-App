@@ -10,7 +10,7 @@
 EUltralytics YOLO26s model trained on /kaggle/working/data_kaggle.yaml8.4.115Ultralytics"2AGPL-3.0 License (https://ultralytics.com/license)¢
 end2endTrue¢$
 docshttps://docs.ultralytics.com¢(
-date 2026-08-19T11:39:34.666165+07:00¢:
+date 2026-08-19T14:06:55.789062+07:00¢:
 +com.github.apple.coremltools.source_dialectTorchScript¢
 headDetect¢4
 #com.github.apple.coremltools.sourcetorch==2.13.0¢

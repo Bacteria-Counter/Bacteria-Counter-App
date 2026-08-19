@@ -6,6 +6,10 @@ struct ColonyCountPanel: View {
     let progress: Double
     let isComplete: Bool
 
+    private var isUncountable: Bool {
+        count > 250
+    }
+
     var body: some View {
         SidebarSection(title: "COLONY COUNT") {
             VStack(spacing: 12) {
@@ -16,7 +20,12 @@ struct ColonyCountPanel: View {
                         .contentTransition(.numericText())
                         .animation(.easeOut(duration: 0.15), value: count)
 
-                    if isComplete {
+                    if isUncountable {
+                        Text("TNTC")
+                            .font(AppTheme.monoSmall)
+                            .foregroundStyle(.orange)
+                            .padding(.bottom, 12)
+                    } else if isComplete {
                         Text("total")
                             .font(AppTheme.monoSmall)
                             .foregroundStyle(AppTheme.textMuted)
@@ -43,13 +52,13 @@ struct ColonyCountPanel: View {
 
                 if isComplete {
                     HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: isUncountable ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(AppTheme.accentGreen)
+                            .foregroundStyle(isUncountable ? .orange : AppTheme.accentGreen)
 
-                        Text("Counting Done")
+                        Text(isUncountable ? "Too Numerous to Count" : "Counting Done")
                             .font(AppTheme.monoSmall)
-                            .foregroundStyle(AppTheme.accentGreen)
+                            .foregroundStyle(isUncountable ? .orange : AppTheme.accentGreen)
                     }
                     .padding(.top, 8)
                 }
@@ -61,7 +70,7 @@ struct ColonyCountPanel: View {
 #Preview {
     HStack(spacing: 0) {
         Color.black
-        ColonyCountPanel(count: 18, isAnalyzing: true, progress: 0.6, isComplete: false)
+        ColonyCountPanel(count: 312, isAnalyzing: false, progress: 1.0, isComplete: true)
     }
     .frame(width: 500, height: 400)
 }
