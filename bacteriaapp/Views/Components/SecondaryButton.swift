@@ -17,6 +17,11 @@ struct SecondaryButton: View {
             .foregroundStyle(AppTheme.accentGreen)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
+            
+            // --- KUNCI PERBAIKAN ---
+            // Jadikan seluruh frame padat (meskipun transparan) agar bisa diklik
+            .contentShape(Rectangle())
+            
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(AppTheme.accentGreenDim, lineWidth: 1)
@@ -30,5 +35,5 @@ struct SecondaryButton: View {
     SecondaryButton(title: "New Capture", icon: "arrow.clockwise") {}
         .padding()
         .frame(width: 220)
-        .background(AppTheme.sidebarBackground)
+        // .background(AppTheme.sidebarBackground) // Pastikan AppTheme tersedia
 }

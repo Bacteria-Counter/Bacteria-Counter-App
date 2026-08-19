@@ -93,14 +93,14 @@ struct CropImageView: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
-            Button("Batal", action: onCancel)
+            Button("Cancel", action: onCancel)
                 .buttonStyle(.plain)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Button("Konfirmasi Potongan", action: confirm)
+            Button("Confirm Crop", action: confirm)
                 .buttonStyle(.plain)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)

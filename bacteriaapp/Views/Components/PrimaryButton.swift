@@ -8,40 +8,31 @@ struct PrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(AppTheme.accentGreen)
-
-                HStack(spacing: 8) {
-                    if isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.black)
-                    } else {
-                        Image(systemName: icon)
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 8) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.black)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
                 }
-                .foregroundStyle(.black)
-                .allowsHitTesting(false)
+
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
             }
+            .foregroundStyle(.black)
             .frame(maxWidth: .infinity)
-            .frame(height: 41)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .frame(height: 48) // Sedikit dinaikkan agar proporsinya mirip seperti di screenshot
+            
+            // KUNCI: Taruh background dan contentShape DI DALAM label Button
+            .contentShape(Rectangle())
+            .background(AppTheme.accentGreen)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .contentShape(RoundedRectangle(cornerRadius: 8))
         .disabled(isLoading)
+        // Efek opacity saat tombol sedang loading
+        .opacity(isLoading ? 0.7 : 1.0)
     }
-}
-
-#Preview {
-    PrimaryButton(title: "Connect iPhone", icon: "wifi") {}
-        .padding()
-        .frame(width: 220)
-        .background(AppTheme.sidebarBackground)
 }
