@@ -77,12 +77,12 @@ struct CropImageView: View {
 
     private var instructions: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Sesuaikan area potong")
-                .font(AppTheme.monoSmall)
+            Text("Adjust the cropping area")
+                .font(AppTheme.monoFont)
                 .foregroundStyle(AppTheme.textPrimary)
-            Text("Geser dan ubah ukuran kotak agar pas 1:1 dengan cawan petri, "
-                 + "lalu konfirmasi untuk mulai menghitung koloni.")
-            .font(AppTheme.monoFont)
+
+            Text("Move or resize the square to fit the petri dish. Keep about 1 cm of space around the dish, then confirm to start counting.")
+                .font(AppTheme.monoSmall)
                 .foregroundStyle(AppTheme.textSecondary)
         }
         .padding(12)

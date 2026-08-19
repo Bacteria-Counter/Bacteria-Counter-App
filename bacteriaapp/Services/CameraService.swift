@@ -110,10 +110,6 @@ final class CameraService: NSObject, ObservableObject {
                 shouldRetryContinuityCamera = false
                 return
             } catch {
-                // Without this, a failed iPhone/Continuity Camera attempt falls
-                // back to the Mac's built-in camera silently -- there was no way
-                // to tell afterward whether the iPhone was never detected or was
-                // detected but failed to start.
                 print("[CameraService] \(candidate.type) (\(candidate.device.localizedName)) failed to start: \(error)")
                 lastError = error
                 clearSession()
@@ -124,8 +120,6 @@ final class CameraService: NSObject, ObservableObject {
             }
         }
 
-        // Keep the MacBook camera as the final fallback. Discover it again so
-        // this candidate is also a fresh AVCaptureDevice instance.
         guard let fallback = cameraCandidates().first(where: { !$0.isContinuityCamera }) else {
             throw lastError ?? CameraError.noDeviceFound
         }
@@ -145,12 +139,12 @@ final class CameraService: NSObject, ObservableObject {
     private func startSession(with device: AVCaptureDevice, type: String) async throws {
         let session = AVCaptureSession()
         session.sessionPreset = .photo
-
+        
+        // Matikan Center Stage secara kooperatif agar sistem tahu aplikasi ini tidak butuh tracking wajah
         if #available(macOS 12.3, *) {
             AVCaptureDevice.centerStageControlMode = .cooperative
             AVCaptureDevice.isCenterStageEnabled = false
         }
-        
 
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw CameraError.cannotAddInput }
@@ -198,8 +192,6 @@ final class CameraService: NSObject, ObservableObject {
             position: .unspecified
         )
 
-        // isContinuityCamera remains reliable even if an older configuration
-        // reports the iPhone using a generic or built-in device type.
         let iPhone = discovery.devices.first(where: {
             isContinuityCameraCandidate($0)
         })
@@ -208,11 +200,6 @@ final class CameraService: NSObject, ObservableObject {
             !isContinuityCameraCandidate($0) && $0.deviceType == .builtInWideAngleCamera
         })
 
-        // Printed so a camera that is labelled wrongly can be read off the
-        // system's own answers. isContinuityCamera and deviceType come from
-        // AVFoundation; the name match is this app's own fallback and is the
-        // part most likely to misfire, since a Mac named after its owner
-        // produces a built-in camera called "<Owner> Camera".
         for d in discovery.devices {
             print("[AgarScope] kamera: \"\(d.localizedName)\" | tipe \(d.deviceType.rawValue) "
                   + "| isContinuityCamera \(d.isContinuityCamera) "
@@ -304,12 +291,6 @@ final class CameraService: NSObject, ObservableObject {
             throw CameraError.notConnected
         }
 
-        // photoOutput.maxPhotoDimensions was only set once, at session-start
-        // time, from whatever format was active then. Continuity Camera can
-        // renegotiate to a higher-resolution format afterward, so the
-        // settings computed below (from the device's CURRENT active format)
-        // can end up larger than this stale ceiling -- refresh it here too,
-        // right before every capture, so output and settings always agree.
         if let currentDevice, let dimensions = Self.maximumPhotoDimensions(for: currentDevice.activeFormat) {
             photoOutput.maxPhotoDimensions = dimensions
         }
@@ -362,12 +343,6 @@ final class CameraService: NSObject, ObservableObject {
             settings = AVCapturePhotoSettings()
         }
 
-        // Re-derive from the device's CURRENT active format rather than
-        // trusting output.maxPhotoDimensions -- the active format can
-        // change after the session starts (Continuity Camera renegotiates
-        // formats), and a stale value here crashes
-        // capturePhoto(with:delegate:) since it must match one of the
-        // *current* format's supportedMaxPhotoDimensions.
         if let device, let dimensions = maximumPhotoDimensions(for: device.activeFormat) {
             settings.maxPhotoDimensions = dimensions
         }
@@ -379,13 +354,6 @@ final class CameraService: NSObject, ObservableObject {
         return settings
     }
 
-    /// The smallest square frame worth capturing, in pixels.
-    ///
-    /// Every camera frame is squared before counting, so what matters is the
-    /// SHORT side: that becomes the side of the square the dish sits in. The
-    /// dish crops in the benchmark run 1693 to 1863 pixels across, and the
-    /// pipeline consumes up to 4480, so 2400 leaves headroom above the former
-    /// without chasing the latter.
     private static let minimumSquareSide: Int32 = 2400
 
     private static func maximumPhotoDimensions(
@@ -398,16 +366,6 @@ final class CameraService: NSObject, ObservableObject {
         let area: (CMVideoDimensions) -> Int64 = { Int64($0.width) * Int64($0.height) }
         let shortSide: (CMVideoDimensions) -> Int32 = { min($0.width, $0.height) }
 
-        // The smallest option that still gives a usable square. Smallest, not
-        // largest, because pixels beyond what the pipeline consumes cost time
-        // and nothing else -- but the floor comes first, since a capture too
-        // small to resolve colonies cannot be recovered later.
-        //
-        // An earlier version of this chose the largest option under a ceiling on
-        // the LONG side, which reads sensibly and behaves badly: on a phone
-        // offering 1920x1080 and 8064x6048 and nothing between, the ceiling
-        // excluded the large option and the app captured at 2 MP. Selecting on
-        // the short side against a floor cannot fail that way.
         if let best = supported
             .filter({ shortSide($0) >= minimumSquareSide })
             .min(by: { area($0) < area($1) }) {
@@ -421,8 +379,6 @@ final class CameraService: NSObject, ObservableObject {
         return best
     }
 
-    /// Printed once per session so a capture that comes out unexpectedly small
-    /// can be read off the camera's own list rather than guessed at.
     private static func logChoice(_ supported: [CMVideoDimensions], _ chosen: CMVideoDimensions) {
         let all = supported
             .sorted { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) }
@@ -439,17 +395,6 @@ final class CameraService: NSObject, ObservableObject {
             return .unavailable
         }
 
-        // Derived from the device's CURRENT active format, not from
-        // output.maxPhotoDimensions -- that property was assigned before
-        // startRunning(), while activeFormat was still the pre-session
-        // default, so reading it back reported a low resolution (640x480)
-        // that never matched what capture actually produced. Capture itself
-        // was always correct: makePhotoSettings() re-derives from
-        // activeFormat at capture time. This was a display bug only.
-        // Reported as the SQUARE that is kept, not as the sensor's own frame.
-        // A plate is round, so the app squares every camera frame before
-        // counting and the sides never reach a model. Printing 1920x1080 next
-        // to a square preview would describe pixels the technician cannot use.
         let dimensions = maximumPhotoDimensions(for: device.activeFormat)
         let resolution = if let dimensions, dimensions.width > 0, dimensions.height > 0 {
             "\(min(dimensions.width, dimensions.height))×\(min(dimensions.width, dimensions.height))"
@@ -469,7 +414,6 @@ final class CameraService: NSObject, ObservableObject {
             ? focusDescription(device.focusMode)
             : "-"
 
-        // AVFoundation doesn't expose AVCaptureDevice.videoZoomFactor on macOS.
         return CaptureSettings(
             resolution: resolution,
             flash: flash,
@@ -541,14 +485,6 @@ final class CameraService: NSObject, ObservableObject {
     }
 }
 
-// AVCapturePhotoOutput invokes these delegate methods on its own internal
-// queue (here, sessionQueue), never guaranteed to be the main actor -- this
-// project defaults every type to @MainActor isolation
-// (SWIFT_DEFAULT_ACTOR_ISOLATION), so this needs an explicit opt-out or
-// calling the delegate crashes under Swift 6's strict concurrency checking.
-// @unchecked Sendable: AVFoundation guarantees these delegate methods fire
-// serially for a single capture, so mutable `didComplete` is never touched
-// concurrently even though the compiler can't verify that on its own.
 nonisolated final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let completion: (Result<NSImage, Error>) -> Void
 

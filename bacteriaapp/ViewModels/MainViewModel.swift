@@ -56,7 +56,7 @@ final class MainViewModel: ObservableObject {
                 + "\(result.averageConfidence)% · \(result.modelUsed.fullDisplayName)"
             return result.usedFullFrame ? base + " · cawan tidak terdeteksi, foto utuh dipakai" : base
         case .cropping:
-            return "Sesuaikan area potong cawan"
+            return "Adjust the petri dish cropping area"
         }
     }
 
