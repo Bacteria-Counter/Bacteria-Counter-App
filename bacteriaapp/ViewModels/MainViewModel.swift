@@ -19,23 +19,9 @@ final class MainViewModel: ObservableObject {
     @Published var connectionError: String?
     @Published private(set) var selectedModel: ModelChoice = .samMicro
 
-    /// The dish crop every model is measured against, and what the viewport
-    /// shows. Cropping is done once per photo and shared: it is the one
-    /// preprocessing step both pipelines agree on, and running it per model
-    /// would put the 84 MB segmentation model through six passes for one plate.
     @Published private(set) var preparedImage: NSImage?
-    /// Set when segmentation could not find a dish and the AgarScope models are
-    /// working from the uncropped photo instead. The lab YOLO models were
-    /// trained on cropped plates and have no equivalent fallback, so they refuse.
     @Published private(set) var usedFullFrame = false
 
-    /// Which stage is running, shown in the status bar while analyzing.
-    ///
-    /// Worth the two lines: a plate that takes eight seconds and a plate that
-    /// has hung look identical when the only feedback is a progress bar that
-    /// invents its own percentage. Each stage also prints its own duration and
-    /// the pixel count it worked on, so a slow run can be reported as numbers
-    /// rather than as an impression.
     @Published private(set) var pendingCropImage: NSImage?
     @Published private(set) var analysisStage: String?
 
@@ -44,9 +30,6 @@ final class MainViewModel: ObservableObject {
     private let segmenter = PetriDishSegmenter()
 
     private var preparedCGImage: CGImage?
-    /// Only a camera frame is squared off; an uploaded file is analysed as the
-    /// user framed it, since they may have cropped it deliberately already.
-    private var photoIsFromCamera = false
     private var analysisTask: Task<Void, Never>?
 
     init() {
@@ -118,13 +101,9 @@ final class MainViewModel: ObservableObject {
 
             do {
                 let image = try await cameraService.capturePhoto()
-                photoIsFromCamera = true
-                capturedImage = image
+                capturedImage = Self.squareCropped(image)
                 startAnalysis(freshPhoto: true)
             } catch {
-                // A capture that fails because the iPhone went away is the
-                // disconnect case, not an analysis error -- it has to reset the
-                // UI rather than leave a message next to a dead preview.
                 if case CameraService.CameraError.notConnected = error {
                     handleCameraConnectionLost()
                 } else {
@@ -134,8 +113,6 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    /// Lets the user analyze a plate photo from disk instead of the camera --
-    /// works regardless of whether a camera is connected.
     func uploadImage() {
         guard appState != .analyzing, appState != .cropping else { return }
         connectionError = nil
@@ -154,7 +131,6 @@ final class MainViewModel: ObservableObject {
             return
         }
 
-        photoIsFromCamera = false
         pendingCropImage = image
         appState = .cropping
     }
@@ -185,7 +161,7 @@ final class MainViewModel: ObservableObject {
         analysisTask = nil
         clearAnalysis()
         capturedImage = nil
-        pendingCropImage = nil   // BARU
+        pendingCropImage = nil
         appState = isDeviceConnected ? .connected : .disconnected
     }
     
@@ -202,7 +178,7 @@ final class MainViewModel: ObservableObject {
         captureSettings = .unavailable
 
         capturedImage = nil
-        pendingCropImage = nil   // BARU
+        pendingCropImage = nil
         clearAnalysis()
         appState = .disconnected
     }
@@ -221,9 +197,7 @@ final class MainViewModel: ObservableObject {
 
         analysisTask?.cancel()
         appState = .analyzing
-        // Cleared here rather than only at capture time, so switching from a
-        // lab model that refused an uncropped photo to one that can count it
-        // does not leave the refusal on screen next to a fresh result.
+        
         connectionError = nil
         colonyCount = 0
         analysisProgress = 0
@@ -237,10 +211,6 @@ final class MainViewModel: ObservableObject {
         let model = selectedModel
 
         analysisTask = Task {
-            // Indeterminate progress while the pipeline runs. There is no
-            // meaningful intermediate percentage to report -- it is a crop plus
-            // one Core ML pass plus filtering -- so this is visual feedback, not
-            // a measurement of how far along it is.
             let progressTask = Task {
                 while !Task.isCancelled && analysisProgress < 0.9 {
                     analysisProgress += 0.03
@@ -282,21 +252,10 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    /// The image this model counts on, cached per photo.
-    ///
-    /// FastSAM takes the photo whole -- no segmentation, no crop -- which is the
-    /// path it ran on before the merge and the one every figure for it was
-    /// measured against. Everything else gets the dish cropped out first, and if
-    /// segmentation cannot find a dish the AgarScope models carry on with the
-    /// full frame while the lab models refuse, since they were trained on crops.
-    ///
-    /// Whatever is returned is also what the viewport shows, so the boxes always
-    /// sit on the picture the model actually looked at.
     private func prepareIfNeeded(_ photo: NSImage, for model: ModelChoice) async throws -> CGImage {
-        guard let loaded = Self.cgImage(from: photo) else {
+        guard let full = Self.cgImage(from: photo) else {
             throw PreparationError.imageUnreadable
         }
-        let full = photoIsFromCamera ? Self.squared(loaded) : loaded
 
         guard model.usesCrop else {
             usedFullFrame = false
@@ -311,9 +270,6 @@ final class MainViewModel: ObservableObject {
         Self.log("segmentasi", since: tSeg, pixels: full.width * full.height,
                  extra: mask == nil ? "GAGAL" : "ok")
 
-        // Cropping draws a canvas the size of the dish, and on a big capture
-        // that is tens of megapixels of work. Off the main actor so the window
-        // keeps repainting.
         analysisStage = "Memotong cawan"
         let tCrop = Date()
         let (prepared, fellBack) = await Task.detached(priority: .userInitiated) {
@@ -336,35 +292,13 @@ final class MainViewModel: ObservableObject {
                                 size: NSSize(width: image.width, height: image.height))
         return image
     }
+    
+    private static func squareCropped(_ image: NSImage) -> NSImage {
+        guard let cg = cgImage(from: image) else { return image }
+        let cropped = squared(cg)
+        return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
+    }
 
-    /// The largest input any model here consumes is 4480 -- sam_micro's
-    /// escalation pass, and every other size is below it. Pixels beyond that
-    /// are letterboxed away before inference, but they are NOT free: the mask
-    /// post-processing allocates one buffer per colony at the input's own
-    /// resolution, so cost grows with colonies times pixels. On a 48 MP photo
-    /// that is 1.45 GB of allocation for detections the model never saw at that
-    /// resolution anyway, and it measured 20.5 s against 1.8 s for a 12 MP photo
-    /// of the same plate.
-    ///
-    /// The area filters are fractions of the image area and circularity is
-    /// scale-free, so nothing downstream reads absolute pixels.
-    /// A camera frame, centred and cut to 1:1.
-    ///
-    /// A plate is round and a 16:9 frame is not, so nearly half of a wide frame
-    /// is bench rather than dish. Measured on the same plate held at the same
-    /// pixel diameter, the share of the frame the dish occupies goes from 0.44
-    /// at 16:9 to 0.64 at 1:1, and the crop the segmenter returns is tighter
-    /// (radius 903 against 950).
-    ///
-    /// It also removes a distortion rather than merely saving pixels: the dish
-    /// segmenter is fed with .scaleFill, which STRETCHES the frame into a
-    /// 512x512 square, so a round dish reaches the model as an ellipse in
-    /// proportion to how far from square the frame is. A square frame is not
-    /// stretched at all.
-    ///
-    /// Counting is unaffected either way -- across 1:1, 4:3 and 16:9 the counts
-    /// moved by at most 4 colonies out of 295, and CSRNet moved least of the
-    /// three models. So this is taken for the crop quality, not for accuracy.
     nonisolated private static func squared(_ image: CGImage) -> CGImage {
         let side = min(image.width, image.height)
         let rect = CGRect(x: (image.width - side) / 2, y: (image.height - side) / 2,
@@ -372,9 +306,6 @@ final class MainViewModel: ObservableObject {
         return image.cropping(to: rect) ?? image
     }
 
-    /// nonisolated: this runs inside the detached task above, and a MainActor
-    /// method would have to hop back to the main thread to do it -- which is the
-    /// hop the detached task exists to avoid.
     nonisolated private static func capped(_ image: CGImage, longSide: Int = 4480) -> CGImage {
         let side = max(image.width, image.height)
         guard side > longSide else { return image }
@@ -408,9 +339,6 @@ final class MainViewModel: ObservableObject {
         }
     }
 
-    /// One line per stage in the Xcode console. Kept to stdout rather than a
-    /// logging framework so it can be copied out of a run and pasted into a bug
-    /// report without any setup.
     nonisolated private static func log(_ stage: String, since: Date,
                                         pixels: Int, extra: String) {
         print(String(format: "[AgarScope] %@ %.2fs %.1f MP %@",
@@ -418,15 +346,6 @@ final class MainViewModel: ObservableObject {
                      Double(pixels) / 1_000_000, extra))
     }
 
-    /// The photo at its FULL pixel size.
-    ///
-    /// `NSImage.size` is in points, not pixels, and a photo carrying DPI
-    /// metadata reports far fewer points than it has pixels -- a capture from
-    /// this app arrived as 0.2 MP that way. Passing that size to
-    /// `cgImage(forProposedRect:)` does not just mislabel the image, it returns
-    /// a genuinely downscaled one, so every model has been counting colonies on
-    /// a few hundred pixels of plate. The representations know the real pixel
-    /// dimensions even when the NSImage does not, so ask them.
     private static func cgImage(from image: NSImage) -> CGImage? {
         let pixels = image.representations.reduce(into: CGSize.zero) { size, rep in
             size.width = max(size.width, CGFloat(rep.pixelsWide))
@@ -435,9 +354,5 @@ final class MainViewModel: ObservableObject {
         var rect = CGRect(origin: .zero,
                           size: pixels.width > 0 && pixels.height > 0 ? pixels : image.size)
         return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-    }
-
-    func exportReport() {
-        // Placeholder for export functionality
     }
 }

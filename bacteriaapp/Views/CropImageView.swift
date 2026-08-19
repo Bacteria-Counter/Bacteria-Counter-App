@@ -78,7 +78,7 @@ struct CropImageView: View {
     private var instructions: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Sesuaikan area potong")
-                .font(AppTheme.monoLarge)
+                .font(AppTheme.monoSmall)
                 .foregroundStyle(AppTheme.textPrimary)
             Text("Geser dan ubah ukuran kotak agar pas 1:1 dengan cawan petri, "
                  + "lalu konfirmasi untuk mulai menghitung koloni.")
@@ -128,6 +128,7 @@ struct CropImageView: View {
         return Rectangle()
             .stroke(AppTheme.accentGreen, lineWidth: 2)
             .frame(width: displayed.width, height: displayed.height)
+            .contentShape(Rectangle())
             .position(x: displayed.midX, y: displayed.midY)
             .gesture(moveGesture(imageFrame: imageFrame))
             .overlay(
