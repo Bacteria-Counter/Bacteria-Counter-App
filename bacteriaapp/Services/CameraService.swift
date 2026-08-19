@@ -146,6 +146,12 @@ final class CameraService: NSObject, ObservableObject {
         let session = AVCaptureSession()
         session.sessionPreset = .photo
 
+        if #available(macOS 12.3, *) {
+            AVCaptureDevice.centerStageControlMode = .cooperative
+            AVCaptureDevice.isCenterStageEnabled = false
+        }
+        
+
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw CameraError.cannotAddInput }
         session.addInput(input)

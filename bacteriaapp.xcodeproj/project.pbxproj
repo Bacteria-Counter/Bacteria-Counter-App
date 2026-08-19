@@ -317,6 +317,7 @@
 					"$(PROJECT_DIR)/bacteriaapp/opencv/build_xcframework/iphoneos/build/build-arm64-iphoneos/build/jpeg12-static.build/Release-iphoneos",
 					"$(PROJECT_DIR)/bacteriaapp/opencv/build_xcframework/iphoneos/build/build-arm64-iphoneos/build/kleidicv_neon.build/Release-iphoneos",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ameliacitra.bacteriaapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -366,6 +367,7 @@
 					"$(PROJECT_DIR)/bacteriaapp/opencv/build_xcframework/iphoneos/build/build-arm64-iphoneos/build/jpeg12-static.build/Release-iphoneos",
 					"$(PROJECT_DIR)/bacteriaapp/opencv/build_xcframework/iphoneos/build/build-arm64-iphoneos/build/kleidicv_neon.build/Release-iphoneos",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ameliacitra.bacteriaapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
