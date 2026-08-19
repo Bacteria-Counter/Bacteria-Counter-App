@@ -37,6 +37,7 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     case csrnet
     case v11s
     case v26s
+    case v26s_new
 
     var id: String { rawValue }
 
@@ -47,7 +48,7 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     var engine: Engine {
         switch self {
         case .samMicro, .mac1, .csrnet: .agarScope
-        case .v11s, .v26s: .labYOLO
+        case .v11s, .v26s, .v26s_new: .labYOLO
         }
     }
 
@@ -74,6 +75,7 @@ enum ModelChoice: String, CaseIterable, Identifiable {
         case .csrnet: "CSRNet"
         case .v11s: "YOLOv11s"
         case .v26s: "YOLOv26s"
+        case .v26s_new: "YOLOv26s new"
         }
     }
 

@@ -11,6 +11,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
     case v11s
     case v26s
     case v26n
+    case v26s_new
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         case .v11s: return "YOLOv11s"
         case .v26s: return "YOLOv26s"
         case .v26n: return "YOLOv26n"
+        case .v26s_new: return "YOLOv26s_new"
         }
     }
 
@@ -28,6 +30,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         case .v11s: return "YOLOv11s"
         case .v26s: return "YOLOv26s"
         case .v26n: return "YOLOv26n"
+        case .v26s_new: return "yolo26s_best"
         }
     }
 
@@ -36,6 +39,7 @@ nonisolated enum YOLOModelVariant: String, CaseIterable, Identifiable, Sendable 
         case .v11s: return 1024
         case .v26s: return 1280
         case .v26n: return 1024
+        case .v26s_new:return 1280
         }
     }
 
