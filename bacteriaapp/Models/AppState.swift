@@ -32,12 +32,12 @@ enum AppState: Equatable {
 /// Renaming the files, the benchmark scripts and the reports to match the
 /// displayed names is a separate pass.
 enum ModelChoice: String, CaseIterable, Identifiable {
+    case v26s_new
     case samMicro = "sam_micro"
     case mac1
     case csrnet
     case v11s
     case v26s
-    case v26s_new
 
     var id: String { rawValue }
 
@@ -70,12 +70,12 @@ enum ModelChoice: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .v26s_new: "YOLOv26s"
         case .samMicro: "FastSAM"
         case .mac1: "YOLOv8n"
         case .csrnet: "CSRNet"
         case .v11s: "YOLOv11s"
         case .v26s: "YOLOv26s"
-        case .v26s_new: "YOLOv26s new"
         }
     }
 
@@ -83,6 +83,10 @@ enum ModelChoice: String, CaseIterable, Identifiable {
     /// than the architecture: naming them by architecture is what led to models
     /// being picked by the wrong criterion once already.
     var fullDisplayName: String { displayName }
+    
+    static var visibleCases: [ModelChoice] {
+        allCases.filter { $0 != .mac1 && $0 != .csrnet && $0 != .v11s && $0 != .v26s }
+    }
 }
 
 struct CaptureSettings: Equatable {

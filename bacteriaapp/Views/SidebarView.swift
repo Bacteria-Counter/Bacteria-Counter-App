@@ -23,7 +23,7 @@ struct SidebarView: View {
                         get: { viewModel.selectedModel },
                         set: { viewModel.selectModel($0) }
                     )) {
-                        ForEach(ModelChoice.allCases) { choice in
+                        ForEach(ModelChoice.visibleCases) { choice in
                             Text(choice.displayName).tag(choice)
                         }
                     }

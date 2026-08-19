@@ -17,7 +17,7 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var analysisResult: AnalysisResult?
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
-    @Published private(set) var selectedModel: ModelChoice = .samMicro
+    @Published private(set) var selectedModel: ModelChoice = .v26s_new
 
     @Published private(set) var preparedImage: NSImage?
     @Published private(set) var usedFullFrame = false
