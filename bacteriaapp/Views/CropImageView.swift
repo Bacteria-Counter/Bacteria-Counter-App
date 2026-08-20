@@ -29,6 +29,11 @@ struct CropImageView: View {
 
     private static let handleSize: CGFloat = 22
     private static let minBoxSide: CGFloat = 60
+    // Aproksimasi 1 cm dalam unit point AppKit (72 pt/inch). Ini bukan
+    // pengukuran fisik akurat dari layar (tidak tahu PPI device), cuma
+    // dipakai sebagai panduan visual seberapa besar margin yang disarankan
+    // antara tepi cawan dan kotak crop.
+    private static let oneCmInPoints: CGFloat = 28.35
 
     var body: some View {
         GeometryReader { geometry in
@@ -51,7 +56,6 @@ struct CropImageView: View {
                 cropBox(imageFrame: frame)
 
                 VStack {
-                    instructions
                     Spacer()
                     controls
                 }
@@ -74,22 +78,6 @@ struct CropImageView: View {
     }
 
     // MARK: - Copy
-
-    private var instructions: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Adjust the cropping area")
-                .font(AppTheme.monoFont)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Text("Move or resize the square to fit the petri dish. Keep about 1 cm of space around the dish, then confirm to start counting.")
-                .font(AppTheme.monoSmall)
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .padding(12)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-        .frame(maxWidth: 360, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     private var controls: some View {
         HStack(spacing: 12) {
@@ -131,6 +119,22 @@ struct CropImageView: View {
             .contentShape(Rectangle())
             .position(x: displayed.midX, y: displayed.midY)
             .gesture(moveGesture(imageFrame: imageFrame))
+            .overlay(
+                // Lingkaran panduan putus-putus: tepi terluarnya 1 cm lebih
+                // kecil dari kotak di tiap sisi, jadi user tahu batas aman
+                // untuk menaruh tepi cawan supaya sisa ruang di kotak ~1cm.
+                Circle()
+                   .stroke(
+                       Color.black,
+                       style: StrokeStyle(lineWidth: 2.5, dash: [8, 6])
+                   )
+                   .frame(
+                       width: max(displayed.width - Self.oneCmInPoints * 1, 0),
+                       height: max(displayed.height - Self.oneCmInPoints * 1, 0)
+                   )
+                   .position(x: displayed.midX, y: displayed.midY)
+                   .allowsHitTesting(false)
+            )
             .overlay(
                 ForEach(Corner.allCases, id: \.self) { corner in
                     Circle()

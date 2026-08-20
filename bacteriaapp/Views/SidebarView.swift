@@ -31,13 +31,27 @@ struct SidebarView: View {
                     .labelsHidden()
                     .disabled(viewModel.appState == .analyzing)
                 }
+                
+                if viewModel.appState == .cropping {
+                    SidebarSection(title: "CROP") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Adjust the cropping area")
+                                .font(AppTheme.monoFont)
+                                .foregroundStyle(AppTheme.textPrimary)
 
-                // Shown only when segmentation failed, because that changes what
-                // the numbers mean: the AgarScope models are counting the whole
-                // photo, and the lab models cannot run at all.
+                            Text("Move or resize the square to fit the petri dish. Line up the dish edge with the dashed circle guide, then confirm to start counting.")
+                                .font(AppTheme.monoSmall)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+
                 if viewModel.usedFullFrame {
-                    SidebarSection(title: "CAWAN") {
-                        Text("Cawan tidak terdeteksi. SAM, Mac1, dan CSRNet menghitung dari foto utuh; model lab butuh potongan cawan dan tidak bisa dipakai pada foto ini.")
+                    SidebarSection(title: "PETRI DISH") {
+                        Text("The Petri dish was not detected. SAM, Mac1, and CSRNet count colonies directly from the full image, while the lab model requires a cropped Petri dish and cannot be used on this image.")
                             .font(AppTheme.monoSmall)
                             .foregroundStyle(AppTheme.accentOrange)
                             .fixedSize(horizontal: false, vertical: true)
