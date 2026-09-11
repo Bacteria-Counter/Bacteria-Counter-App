@@ -55,13 +55,8 @@ final class MainViewModel: ObservableObject {
             return "\(analysisStage ?? "Analyzing") · \(Int(analysisProgress * 100))%"
         case .complete:
             guard let result = analysisResult else { return "Complete" }
-<<<<<<< Updated upstream
             let base = "Complete · \(result.totalColonies) colonies · \(result.averageConfidence)% average confidence "
                 + "· \(result.modelUsed.fullDisplayName)"
-=======
-            let base = "Complete · \(colonyCount) colonies · avg conf "
-                + "\(result.averageConfidence)% · \(result.modelUsed.fullDisplayName)"
->>>>>>> Stashed changes
             return result.usedFullFrame ? base + " · cawan tidak terdeteksi, foto utuh dipakai" : base
         case .cropping:
             return "Adjust the petri dish cropping area"

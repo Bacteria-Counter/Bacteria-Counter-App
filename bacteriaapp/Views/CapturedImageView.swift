@@ -115,20 +115,10 @@ struct CapturedImageView: View {
                 ForEach(detections) { detection in
                     let selected = detection.id == selectedID
                     Rectangle()
-                        // Divided by the zoom so the outline stays a hairline
-                        // on screen. At 12x a fixed 2pt stroke becomes 24pt and
-                        // swallows the very colonies the zoom was for.
-<<<<<<< Updated upstream
-                        .stroke(.red, lineWidth: 2 / z)
-                        .frame(width: w, height: h)
-=======
                         .stroke(selected ? Color.red
-                                    : detection.isManual ? AppTheme.accentYellow : AppTheme.accentGreen,
+                                : detection.isManual ? Color.blue : Color.black,
                                 lineWidth: (selected ? 3 : 2) / map.zoom)
                         .frame(width: detection.width * map.fit, height: detection.height * map.fit)
->>>>>>> Stashed changes
-                        // .position takes a centre, and the detection carries a
-                        // top-left corner.
                         .position(x: (detection.x + detection.width / 2) * map.fit + map.origin.x,
                                   y: (detection.y + detection.height / 2) * map.fit + map.origin.y)
                 }
