@@ -115,8 +115,8 @@ struct CapturedImageView: View {
                 ForEach(detections) { detection in
                     let selected = detection.id == selectedID
                     Rectangle()
-                        .stroke(selected ? Color.red
-                                : detection.isManual ? Color.blue : Color.black,
+                        .stroke(selected ? .redBoundingBox
+                                : detection.isManual ? .blueBoundingBox : .blueBoundingBox,
                                 lineWidth: (selected ? 3 : 2) / map.zoom)
                         .frame(width: detection.width * map.fit, height: detection.height * map.fit)
                         .position(x: (detection.x + detection.width / 2) * map.fit + map.origin.x,
