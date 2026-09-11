@@ -1,0 +1,40 @@
+AgarScope (bacteriaapp) 1.0
+Penghitung koloni bakteri dari foto cawan petri. Berjalan sepenuhnya di
+perangkat, tidak perlu internet dan tidak perlu menjalankan server Python.
+
+SYARAT
+- macOS 15.6 atau lebih baru
+- Mac Apple Silicon atau Intel (aplikasi ini universal, keduanya didukung)
+- Ruang disk sekitar 300 MB
+
+CARA INSTAL
+1. Seret ikon "bacteriaapp" ke folder "Applications" di jendela ini.
+2. Buka folder Applications, klik dua kali "bacteriaapp".
+
+Itu saja. Aplikasi ini sudah ditandatangani dan dinotarisasi oleh Apple,
+jadi tidak akan muncul peringatan keamanan.
+
+IZIN KAMERA
+Saat pertama kali menekan tombol kamera, macOS akan meminta izin akses
+kamera. Pilih "Allow". Continuity Camera (memakai iPhone sebagai kamera)
+juga didukung: iPhone harus berada di dekat Mac, dengan Wi-Fi dan Bluetooth
+menyala, dan masuk ke Apple ID yang sama.
+
+MEMILIH MODEL
+Model dipilih di sidebar. Ringkasnya:
+- mac1_*    YOLO hasil fine-tuning. Paling akurat di antara varian YOLO dan
+            tidak pernah menghasilkan deteksi palsu pada cawan kosong.
+            Pakai ini bila false positive lebih merugikan daripada koloni
+            yang terlewat: uji sterilitas, kontrol negatif, pelaporan
+            "no growth".
+- fastsam_* CLAHE + FastSAM + penyaringan bentuk. Akurasi umum terbaik pada
+            cawan berlatar terang. Kelemahannya koloni sangat kecil.
+            Angka di belakang nama adalah resolusi pemrosesan; makin besar
+            makin lambat tetapi makin peka pada koloni kecil.
+- csrnet    Regresi peta kepadatan, bukan deteksi kotak. Tidak menampilkan
+            lingkaran per koloni, hanya heatmap dan total. Paling bersih
+            pada cawan kosong, tetapi pelatihannya belum selesai dan
+            cenderung melebihkan hitungan pada cawan padat.
+
+MENGHAPUS
+Seret bacteriaapp dari folder Applications ke Trash.

@@ -57,6 +57,16 @@ public enum AgarScope {
     public struct Detection: Sendable {
         /// Top-left corner and size, matching the image's own pixel axes.
         public let x: Double, y: Double, width: Double, height: Double
+        /// The model's score for this detection, 0...1.
+        ///
+        /// Exposed so detections can be RANKED, which is what Average Precision
+        /// needs and what its absence previously made impossible to compute.
+        /// What it means differs by pipeline and the difference matters: for the
+        /// YOLO path it is the detector's class score, for FastSAM it is an
+        /// objectness score from a model that segments without classes. Both
+        /// order candidates sensibly; neither should be shown to a user as
+        /// "probability this is a colony".
+        public let confidence: Double
     }
 
     public struct Output: Sendable {
@@ -151,7 +161,8 @@ public enum AgarScope {
                 // +1: min and max are both inside the colony, so a mask one
                 // pixel across spans one pixel, not zero.
                 return Detection(x: x0, y: y0,
-                                 width: xs.max()! - x0 + 1, height: ys.max()! - y0 + 1)
+                                 width: xs.max()! - x0 + 1, height: ys.max()! - y0 + 1,
+                                 confidence: c.confidence)
             }
             let conf = r.colonies.isEmpty ? 0
                 : r.colonies.reduce(0) { $0 + $1.circularity } / Double(r.colonies.count) * 100
@@ -171,7 +182,8 @@ public enum AgarScope {
                       // long colony's mark cover agar on both sides of it.
                       detections: r.boxes.map {
                           Detection(x: $0.x1, y: $0.y1,
-                                    width: $0.x2 - $0.x1, height: $0.y2 - $0.y1)
+                                    width: $0.x2 - $0.x1, height: $0.y2 - $0.y1,
+                                    confidence: $0.conf)
                       },
                       imageWidth: w, imageHeight: h,
                       countability: CFU.assess(count: r.count), heatmapPNG: nil,

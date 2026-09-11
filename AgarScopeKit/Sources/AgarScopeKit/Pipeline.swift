@@ -9,8 +9,8 @@ import Foundation
 /// each was fixed by a measurement recorded there.
 enum Pipeline {
     // From server.py's SAM_TUNED_* block.
-    static let conf: Float = 0.2
-    static let minCircularity = 0.75
+    static let conf: Float = Float(ProcessInfo.processInfo.environment["AS_CONF"] ?? "") ?? 0.2
+    static let minCircularity = Double(ProcessInfo.processInfo.environment["AS_CIRC"] ?? "") ?? 0.75
     static let dishMarginRatio = 1.0
     static let minAreaFrac = 0.0000001
     static let maxAreaFrac = 0.005
@@ -40,6 +40,12 @@ enum Pipeline {
     struct Colony {
         var mask: [UInt8]; var area: Double; var cx: Double; var cy: Double
         var circularity: Double
+        /// FastSAM's objectness score for the candidate this mask came from.
+        ///
+        /// Carried through rather than dropped at the mask step, because it is
+        /// the only ranking signal the segmentation path has, and Average
+        /// Precision cannot be computed without one.
+        var confidence: Double
     }
 
     struct Result {
@@ -91,15 +97,17 @@ enum Pipeline {
     }
 
     /// Circularity, area and rim filters, then the marking outlier test.
-    static func filter(masks: [[UInt8]], width: Int, height: Int,
+    static func filter(masks: [[UInt8]], scores: [Double] = [], width: Int, height: Int,
                        original: Bitmap, dish: DishDetect.Circle?) -> [Colony] {
         let imgArea = Double(width * height)
         var kept: [Colony] = []
-        for m in masks {
+        var dCirc = 0, dSmall = 0, dBig = 0, dRim = 0
+        for (i, m) in masks.enumerated() {
             let (circ, area) = Contours.circularity(m, width: width, height: height)
-            if circ < minCircularity { continue }
+            if circ < minCircularity { dCirc += 1; continue }
             let frac = area / imgArea
-            if frac < minAreaFrac || frac > maxAreaFrac { continue }
+            if frac < minAreaFrac { dSmall += 1; continue }
+            if frac > maxAreaFrac { dBig += 1; continue }
             var sx = 0.0, sy = 0.0, n = 0.0
             for y in 0..<height {
                 for x in 0..<width where m[y * width + x] != 0 {
@@ -110,10 +118,12 @@ enum Pipeline {
             let cx = sx / n, cy = sy / n
             if let d = dish {
                 let dist = ((cx - d.cx) * (cx - d.cx) + (cy - d.cy) * (cy - d.cy)).squareRoot()
-                if dist > d.r * dishMarginRatio { continue }
+                if dist > d.r * dishMarginRatio { dRim += 1; continue }
             }
-            kept.append(Colony(mask: m, area: area, cx: cx, cy: cy, circularity: circ))
+            kept.append(Colony(mask: m, area: area, cx: cx, cy: cy, circularity: circ,
+                               confidence: i < scores.count ? scores[i] : 0))
         }
+        FileHandle.standardError.write(Data("DIAG|kandidat=\(masks.count)|tolak_bulat=\(dCirc)|tolak_kecil=\(dSmall)|tolak_besar=\(dBig)|tolak_tepi=\(dRim)|lolos=\(kept.count)\n".utf8))
         guard !kept.isEmpty, let d = dish else { return kept }
 
         // Marking rejection, judged against this plate's own detections --
@@ -122,6 +132,7 @@ enum Pipeline {
                                                  width: width, height: height,
                                                  dish: d) }
         let flagged = Markings.findOutliers(feats)
+        FileHandle.standardError.write(Data("DIAG|tolak_penanda=\(flagged.count)|final=\(kept.count - flagged.count)\n".utf8))
         return kept.enumerated().filter { !flagged.contains($0.offset) }.map { $0.element }
     }
 
@@ -145,7 +156,8 @@ enum Pipeline {
             let masks = PostProcess.masks(proto: raw.proto, detections: dets,
                                           letterboxW: s, letterboxH: s,
                                           originalW: image.width, originalH: image.height)
-            return filter(masks: masks, width: image.width, height: image.height,
+            return filter(masks: masks, scores: dets.map { Double($0.conf) },
+                          width: image.width, height: image.height,
                           original: image, dish: dish)
         }
 

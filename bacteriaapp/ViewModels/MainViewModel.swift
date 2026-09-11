@@ -15,6 +15,9 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var colonyCount: Int = 0
     @Published private(set) var analysisProgress: Double = 0
     @Published private(set) var analysisResult: AnalysisResult?
+    /// The model's boxes after the user's corrections. `analysisResult` keeps
+    /// what the model itself returned.
+    @Published private(set) var detections: [ColonyDetection] = []
     @Published private(set) var captureSettings = CaptureSettings.unavailable
     @Published var connectionError: String?
     @Published private(set) var selectedModel: ModelChoice = .v26s_new
@@ -52,8 +55,13 @@ final class MainViewModel: ObservableObject {
             return "\(analysisStage ?? "Analyzing") · \(Int(analysisProgress * 100))%"
         case .complete:
             guard let result = analysisResult else { return "Complete" }
+<<<<<<< Updated upstream
             let base = "Complete · \(result.totalColonies) colonies · \(result.averageConfidence)% average confidence "
                 + "· \(result.modelUsed.fullDisplayName)"
+=======
+            let base = "Complete · \(colonyCount) colonies · avg conf "
+                + "\(result.averageConfidence)% · \(result.modelUsed.fullDisplayName)"
+>>>>>>> Stashed changes
             return result.usedFullFrame ? base + " · cawan tidak terdeteksi, foto utuh dipakai" : base
         case .cropping:
             return "Adjust the petri dish cropping area"
@@ -164,7 +172,20 @@ final class MainViewModel: ObservableObject {
         pendingCropImage = nil
         appState = isDeviceConnected ? .connected : .disconnected
     }
-    
+
+    func removeDetection(_ id: ColonyDetection.ID) {
+        guard appState == .complete,
+              let index = detections.firstIndex(where: { $0.id == id }) else { return }
+        detections.remove(at: index)
+        colonyCount -= 1
+    }
+
+    func addDetection(_ detection: ColonyDetection) {
+        guard appState == .complete else { return }
+        detections.append(detection)
+        colonyCount += 1
+    }
+
     private func handleCameraConnectionLost() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -190,6 +211,7 @@ final class MainViewModel: ObservableObject {
         colonyCount = 0
         analysisProgress = 0
         analysisResult = nil
+        detections = []
     }
 
     private func startAnalysis(freshPhoto: Bool) {
@@ -202,6 +224,7 @@ final class MainViewModel: ObservableObject {
         colonyCount = 0
         analysisProgress = 0
         analysisResult = nil
+        detections = []
         if freshPhoto {
             preparedImage = nil
             preparedCGImage = nil
@@ -238,6 +261,7 @@ final class MainViewModel: ObservableObject {
                 guard !Task.isCancelled else { return }
 
                 colonyCount = result.totalColonies
+                detections = result.detections
                 analysisProgress = 1.0
                 analysisResult = result
                 analysisStage = nil

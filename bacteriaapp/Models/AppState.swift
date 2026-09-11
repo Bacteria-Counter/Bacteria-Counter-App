@@ -105,11 +105,14 @@ struct CaptureSettings: Equatable {
 ///
 /// A box rather than a circle because colonies are not reliably round. A circle
 /// over an irregular or merged colony either clips it or claims agar around it.
-struct ColonyDetection: Equatable {
+struct ColonyDetection: Equatable, Identifiable {
+    let id = UUID()
     let x: Double
     let y: Double
     let width: Double
     let height: Double
+    /// Drawn by the user over a colony the model missed, not by the model.
+    var isManual = false
 }
 
 struct AnalysisResult: Equatable {

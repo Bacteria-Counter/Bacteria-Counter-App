@@ -29,13 +29,15 @@ struct MainViewportView: View {
                let heatmap = viewModel.analysisResult?.heatmapImage {
                 CapturedImageView(image: heatmap)
             } else {
+                let isComplete = viewModel.appState == .complete
                 CapturedImageView(
                     image: plate,
-                    detections: viewModel.appState == .complete
-                        ? (viewModel.analysisResult?.detections ?? []) : [],
+                    detections: isComplete ? viewModel.detections : [],
                     detectionImageSize: viewModel.analysisResult.map {
                         CGSize(width: $0.imageWidth, height: $0.imageHeight)
-                    }
+                    },
+                    onRemove: isComplete ? { viewModel.removeDetection($0) } : nil,
+                    onAdd: isComplete ? { viewModel.addDetection($0) } : nil
                 )
             }
         } else if viewModel.appState == .connected,
