@@ -89,7 +89,7 @@ struct CapturedImageView: View {
                         // Divided by the zoom so the outline stays a hairline
                         // on screen. At 12x a fixed 2pt stroke becomes 24pt and
                         // swallows the very colonies the zoom was for.
-                        .stroke(AppTheme.accentGreen, lineWidth: 2 / z)
+                        .stroke(.red, lineWidth: 2 / z)
                         .frame(width: w, height: h)
                         // .position takes a centre, and the detection carries a
                         // top-left corner.

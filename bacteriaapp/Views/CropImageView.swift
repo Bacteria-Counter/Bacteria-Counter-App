@@ -125,7 +125,7 @@ struct CropImageView: View {
                 // untuk menaruh tepi cawan supaya sisa ruang di kotak ~1cm.
                 Circle()
                    .stroke(
-                       Color.black,
+                       Color.white,
                        style: StrokeStyle(lineWidth: 2.5, dash: [8, 6])
                    )
                    .frame(

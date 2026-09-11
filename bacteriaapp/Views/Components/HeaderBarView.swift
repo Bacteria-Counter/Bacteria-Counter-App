@@ -13,7 +13,7 @@ struct HeaderBarView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(AppTheme.textMuted)
 
-                Text("AgarScope — Bacterial Colony Analyzer")
+                Text("AgarScope — Bacterial Colony Counter")
                     .font(AppTheme.monoSmall)
                     .foregroundStyle(AppTheme.textSecondary)
             }
